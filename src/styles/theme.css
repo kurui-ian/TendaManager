@@ -1,0 +1,78 @@
+/**
+ * TendaManager Replaceable Theme Tokens
+ * All visual components consume strictly these semantic CSS variables.
+ * To replace the theme in a future update, only this file needs to be modified.
+ */
+:root {
+  color-scheme: dark light;
+
+  /* Surfaces & Backgrounds */
+  --bg-app: #0f141c;
+  --bg-sidebar: #141b26;
+  --bg-surface: #18212f;
+  --bg-elevated: #1f2b3d;
+  --bg-input: #111722;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+
+  /* Typography */
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-on-accent: #ffffff;
+
+  /* Brand & Accent (Tenda-inspired warm orange + clean slate) */
+  --accent-primary: #f97316;
+  --accent-hover: #ea580c;
+  --accent-subtle: rgba(249, 115, 22, 0.14);
+  --accent-border: rgba(249, 115, 22, 0.4);
+
+  /* Semantic Status Colors */
+  --status-success: #10b981;
+  --status-success-bg: rgba(16, 185, 129, 0.14);
+  --status-warning: #f59e0b;
+  --status-warning-bg: rgba(245, 158, 11, 0.14);
+  --status-danger: #ef4444;
+  --status-danger-bg: rgba(239, 68, 68, 0.14);
+  --status-info: #3b82f6;
+  --status-info-bg: rgba(59, 130, 246, 0.14);
+
+  /* Borders & Dividers */
+  --border-subtle: #263347;
+  --border-strong: #364863;
+  --focus-ring: 0 0 0 2px rgba(249, 115, 22, 0.55);
+
+  /* Spacing & Geometry */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.24);
+  --shadow-modal: 0 20px 50px rgba(0, 0, 0, 0.55);
+
+  /* Font Stacks */
+  --font-sans: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+}
+
+[data-theme='light'] {
+  --bg-app: #f1f5f9;
+  --bg-sidebar: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f8fafc;
+  --bg-input: #f8fafc;
+  --bg-hover: rgba(15, 23, 42, 0.04);
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-on-accent: #ffffff;
+
+  --accent-primary: #ea580c;
+  --accent-hover: #c2410c;
+  --accent-subtle: rgba(234, 88, 12, 0.1);
+  --accent-border: rgba(234, 88, 12, 0.35);
+
+  --border-subtle: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --shadow-card: 0 2px 8px rgba(15, 23, 42, 0.06);
+  --shadow-modal: 0 16px 40px rgba(15, 23, 42, 0.18);
+}
