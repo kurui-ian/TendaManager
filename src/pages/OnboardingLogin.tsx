@@ -1,20 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Activity,
   AlertCircle,
-  CheckCircle2,
-  Cpu,
   ExternalLink,
   Eye,
   EyeOff,
-  HelpCircle,
-  Lock,
-  Radio,
   RefreshCw,
-  Server,
-  Wifi,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { TendaRouterIcon } from '../components/TendaRouterIcon';
 
 export const OnboardingLogin: React.FC = () => {
   const {
@@ -56,7 +49,7 @@ export const OnboardingLogin: React.FC = () => {
     e.preventDefault();
     setErrorMsg(null);
     if (!isPasswordlessRouter && !password.trim()) {
-      setErrorMsg('Please enter the router administrator password.');
+      setErrorMsg('Enter the router administrator password.');
       return;
     }
 
@@ -70,7 +63,7 @@ export const OnboardingLogin: React.FC = () => {
     setSubmitting(false);
 
     if (!res.success) {
-      setErrorMsg(res.errorMessage || 'Authentication failed. Please check your password and router IP.');
+      setErrorMsg(res.errorMessage || 'Unable to connect to the router.');
     }
   };
 
@@ -92,120 +85,87 @@ export const OnboardingLogin: React.FC = () => {
   return (
     <div className="login-viewport">
       <div className="login-card">
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-          <div className="brand-logo" style={{ width: '42px', height: '42px' }}>
-            <Activity size={24} />
+        {/* Brand Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+            <div className="brand-logo" style={{ width: 38, height: 38 }}>
+              <TendaRouterIcon size={24} />
+            </div>
+            <div>
+              <h1 style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>TendaManager</h1>
+              <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                {discovering ? (
+                  'Detecting router...'
+                ) : discovery?.isTendaDetected ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)' }}>
+                    <span className="status-dot online" />
+                    <span>{discovery.detectedModel || 'Tenda F3'}</span>
+                    <span>·</span>
+                    <span className="mono">{discovery.reachableGateway}</span>
+                  </span>
+                ) : (
+                  'Router Login'
+                )}
+              </div>
+            </div>
           </div>
-          <div>
-            <h1 style={{ fontSize: '20px', fontWeight: 700 }}>TendaManager</h1>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
-              Local-Network Desktop Management for Tenda F3
-            </p>
-          </div>
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => runDiscovery(routerAddress)}
+            disabled={discovering}
+            title="Rescan network"
+          >
+            <RefreshCw size={13} className={discovering ? 'spin' : ''} />
+            <span>Scan</span>
+          </button>
         </div>
 
-        {/* Discovery Banner */}
-        <div
-          style={{
-            backgroundColor: 'var(--bg-elevated)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-md)',
-            padding: '14px 16px',
-            marginBottom: '20px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-              {discovering ? 'Scanning Local Network & ARP Neighbors...' : 'Network Discovery Summary'}
-            </span>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              style={{ padding: '3px 9px', fontSize: '11.5px' }}
-              onClick={() => runDiscovery(routerAddress)}
-              disabled={discovering}
-            >
-              <RefreshCw size={12} />
-              Rescan
-            </button>
-          </div>
-
-          {discovery?.networkInterface ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '12.5px' }}>
-              <div>
-                <span style={{ color: 'var(--text-muted)' }}>Local IP: </span>
-                <strong className="mono">{discovery.networkInterface.localIp}</strong>
-              </div>
-              <div>
-                <span style={{ color: 'var(--text-muted)' }}>Subnet: </span>
-                <strong className="mono">{discovery.networkInterface.subnetMask}</strong>
-              </div>
-              <div>
-                <span style={{ color: 'var(--text-muted)' }}>Gateway: </span>
-                <strong className="mono">{discovery.networkInterface.defaultGateway}</strong>
-              </div>
-              <div>
-                <span style={{ color: 'var(--text-muted)' }}>Interface: </span>
-                <strong>
-                  {discovery.networkInterface.connectionType}
-                  {discovery.networkInterface.ssid ? ` (${discovery.networkInterface.ssid})` : ''}
-                </strong>
-              </div>
-            </div>
-          ) : (
-            <div style={{ fontSize: '12.5px', color: 'var(--status-warning)' }}>
-              No active local network interface detected.
-            </div>
-          )}
-
-          <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)' }}>
-            {discovery?.isTendaDetected ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--status-success)', fontSize: '12.5px' }}>
-                  <CheckCircle2 size={15} />
-                  <span>
-                    Detected <strong>{discovery.detectedModel || 'Tenda F3'}</strong> ({discovery.detectedHardwareVersion}) at{' '}
-                    <strong className="mono">{discovery.reachableGateway}</strong>
+        {/* Concise Detected Router Status */}
+        {discovery && !discovering && (
+          <div
+            style={{
+              backgroundColor: 'var(--bg-elevated)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '10px 12px',
+              marginBottom: 18,
+              fontSize: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            {discovery.isTendaDetected ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Detected Router</span>
+                  <span style={{ fontWeight: 600 }}>
+                    {discovery.detectedModel || 'Tenda F3'} ({discovery.detectedFirmware || discovery.detectedHardwareVersion})
                   </span>
                 </div>
                 {discovery.operatingMode && discovery.operatingMode !== 'disabled' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-primary)', fontSize: '12px' }}>
-                    <Radio size={14} />
-                    <span>
-                      Operating in{' '}
-                      <strong>
-                        {discovery.operatingMode === 'client+ap'
-                          ? 'Universal Repeater Mode'
-                          : discovery.operatingMode.toUpperCase()}
-                      </strong>
-                      {discovery.upstreamSsid ? ` • Bridging "${discovery.upstreamSsid}"` : ''}
-                      {discovery.extenderSsid ? ` → "${discovery.extenderSsid}"` : ''}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Mode</span>
+                    <span style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>
+                      {discovery.operatingMode === 'client+ap'
+                        ? `Universal Repeater${discovery.upstreamSsid ? ` (${discovery.upstreamSsid})` : ''}`
+                        : discovery.operatingMode.toUpperCase()}
                     </span>
                   </div>
                 )}
-              </div>
-            ) : discovery?.nonTendaVendorHint ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12.5px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--status-warning)' }}>
-                  <AlertCircle size={15} />
-                  <span>
-                    Gateway <strong className="mono">{discovery.reachableGateway}</strong> responded as{' '}
-                    <strong>{discovery.nonTendaVendorHint}</strong> (not a Tenda F3).
-                  </span>
-                </div>
-                <div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
-                  Connect to your Tenda F3 Wi-Fi, enter your Tenda F3 IP below, or launch the built-in Tenda F3 Simulator to test all features locally.
-                </div>
-              </div>
+              </>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', fontSize: '12.5px' }}>
-                <Wifi size={15} />
-                <span>Enter your Tenda F3 gateway address (commonly 192.168.0.1 or tendawifi.com).</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Local Gateway</span>
+                <span className="mono">
+                  {discovery.reachableGateway || discovery.networkInterface?.defaultGateway || '192.168.0.1'}
+                </span>
               </div>
             )}
           </div>
-        </div>
+        )}
 
         {/* Login Form */}
         <form onSubmit={handleLoginSubmit}>
@@ -213,23 +173,21 @@ export const OnboardingLogin: React.FC = () => {
             <label className="form-label" htmlFor="router-address-input">
               Router Address
             </label>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                id="router-address-input"
-                type="text"
-                className="form-input mono"
-                value={routerAddress}
-                onChange={(e) => setRouterAddress(e.target.value)}
-                placeholder="192.168.0.1 or tendawifi.com"
-                required
-              />
-            </div>
+            <input
+              id="router-address-input"
+              type="text"
+              className="form-input mono"
+              value={routerAddress}
+              onChange={(e) => setRouterAddress(e.target.value)}
+              placeholder="192.168.0.1"
+              required
+            />
           </div>
 
           {showUsernameField && (
             <div className="form-group">
               <label className="form-label" htmlFor="router-username-input">
-                Administrator Username
+                Username
               </label>
               <input
                 id="router-username-input"
@@ -245,35 +203,37 @@ export const OnboardingLogin: React.FC = () => {
           <div className="form-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label className="form-label" htmlFor="router-password-input">
-                Administrator Password {isPasswordlessRouter && <span className="badge badge-success" style={{ marginLeft: 6 }}>No Password Set</span>}
+                Password
               </label>
-              <button
-                type="button"
-                onClick={() => setShowUsernameField((v) => !v)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--text-muted)',
-                  fontSize: '11.5px',
-                  cursor: 'pointer',
-                }}
-              >
-                {showUsernameField ? 'Hide username field' : 'Firmware requires username?'}
-              </button>
+              {isPasswordlessRouter ? (
+                <span style={{ fontSize: 11, color: 'var(--status-success)', fontWeight: 500 }}>
+                  No password set
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowUsernameField((v) => !v)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    fontSize: 11.5,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {showUsernameField ? 'Hide username' : 'Use username'}
+                </button>
+              )}
             </div>
             <div style={{ position: 'relative' }}>
               <input
                 id="router-password-input"
                 type={showPassword ? 'text' : 'password'}
                 className="form-input"
-                style={{ paddingRight: '42px' }}
+                style={{ paddingRight: 38 }}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={
-                  isPasswordlessRouter
-                    ? 'No login password set on router (leave blank to connect)'
-                    : 'Enter router login password'
-                }
+                placeholder={isPasswordlessRouter ? 'Optional (no password configured)' : 'Administrator password'}
                 autoFocus
               />
               <button
@@ -282,36 +242,36 @@ export const OnboardingLogin: React.FC = () => {
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
                 style={{
                   position: 'absolute',
-                  right: '10px',
+                  right: 10,
                   top: '50%',
                   transform: 'translateY(-50%)',
                   background: 'none',
                   border: 'none',
-                  color: 'var(--text-secondary)',
+                  color: 'var(--text-muted)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                 }}
               >
-                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
             <label className="checkbox-row">
               <input
                 type="checkbox"
                 checked={rememberSession}
                 onChange={(e) => setRememberSession(e.target.checked)}
               />
-              <span>Remember this session (Windows Credential Vault)</span>
+              <span>Remember session</span>
             </label>
           </div>
 
           {errorMsg && (
-            <div className="alert-banner danger" style={{ marginBottom: '16px' }}>
-              <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '1px' }} />
+            <div className="alert-banner danger" style={{ marginBottom: 14 }}>
+              <AlertCircle size={15} style={{ flexShrink: 0 }} />
               <span>{errorMsg}</span>
             </div>
           )}
@@ -319,105 +279,82 @@ export const OnboardingLogin: React.FC = () => {
           <button
             type="submit"
             className="btn btn-primary"
-            style={{ width: '100%', padding: '11px' }}
+            style={{ width: '100%', padding: '9px 14px' }}
             disabled={submitting}
           >
-            <Lock size={16} />
-            {submitting
-              ? 'Authenticating with Router...'
-              : isPasswordlessRouter && !password
-              ? `CONNECT TO ${routerAddress}`
-              : 'LOGIN'}
+            {submitting ? 'Connecting...' : 'Sign In'}
           </button>
         </form>
 
-        {/* Troubleshoot & Local Simulator Section */}
+        {/* Minimal Connection Options Footer */}
         <div
           style={{
-            marginTop: '20px',
-            paddingTop: '16px',
+            marginTop: 18,
+            paddingTop: 14,
             borderTop: '1px solid var(--border-subtle)',
             display: 'flex',
             flexDirection: 'column',
-            gap: '12px',
+            gap: 10,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>Can&apos;t connect to your Tenda F3?</span>
             <button
               type="button"
-              className="btn btn-secondary btn-sm"
+              className="btn btn-ghost btn-sm"
+              style={{ padding: '3px 6px' }}
               onClick={() => setShowTroubleshoot((v) => !v)}
             >
-              <HelpCircle size={14} />
-              {showTroubleshoot ? 'Hide Troubleshooter' : 'Troubleshoot Connection'}
+              Connection options
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ padding: '3px 6px' }}
+              onClick={() => window.tendaApi?.openWebInterface(routerAddress)}
+            >
+              <ExternalLink size={12} />
+              <span>Open in browser</span>
             </button>
           </div>
 
-          {(!discovery?.isTendaDetected || showTroubleshoot) && (
+          {showTroubleshoot && (
             <div
               style={{
-                backgroundColor: 'var(--bg-input)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '14px',
                 display: 'flex',
-                flexDirection: 'column',
-                gap: '10px',
-                fontSize: '12.5px',
+                flexWrap: 'wrap',
+                gap: 8,
+                paddingTop: 4,
               }}
             >
-              <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                Connection Troubleshooting & Testing Options
-              </div>
-              <ul style={{ paddingLeft: '18px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <li>Ensure your PC is connected to the Tenda F3 Wi-Fi or LAN port.</li>
-                <li>Default Tenda F3 management address is <code className="mono">192.168.0.1</code> or <code className="mono">tendawifi.com</code>.</li>
-                <li>In <strong>Universal Repeater</strong> mode, the Tenda F3 uses an IP from your main router (auto-detected via ARP).</li>
-              </ul>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  setRouterAddress('192.168.0.1');
+                  runDiscovery('192.168.0.1');
+                }}
+              >
+                Use 192.168.0.1
+              </button>
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
+              {!discovery?.simulatorActive ? (
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  onClick={() => {
-                    setRouterAddress('192.168.0.1');
-                    runDiscovery('192.168.0.1');
-                  }}
+                  onClick={handleStartSimulator}
                 >
-                  <Server size={13} />
-                  Try 192.168.0.1
+                  Start Local Simulator
                 </button>
-
+              ) : (
                 <button
                   type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => window.tendaApi?.openWebInterface(routerAddress)}
+                  className="btn btn-danger btn-sm"
+                  onClick={handleStopSimulator}
                 >
-                  <ExternalLink size={13} />
-                  Open in Browser
+                  Stop Simulator
                 </button>
-
-                {!discovery?.simulatorActive ? (
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={handleStartSimulator}
-                    title="Starts a local Tenda F3 V12.01.01.48_en HTTP Firmware Simulator on 127.0.0.1 (password: admin)"
-                  >
-                    <Cpu size={13} />
-                    Use Local Tenda F3 Simulator (pwd: admin)
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn btn-danger btn-sm"
-                    onClick={handleStopSimulator}
-                  >
-                    Stop Simulator
-                  </button>
-                )}
-              </div>
+              )}
             </div>
           )}
         </div>

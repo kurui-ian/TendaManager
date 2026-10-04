@@ -26,7 +26,8 @@ function createMainWindow(): BrowserWindow {
     height: 800,
     minWidth: 1000,
     minHeight: 650,
-    title: 'TendaManager — Desktop Router Management',
+    title: 'TendaManager',
+    backgroundColor: '#0f1116',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     autoHideMenuBar: true,
     webPreferences: {

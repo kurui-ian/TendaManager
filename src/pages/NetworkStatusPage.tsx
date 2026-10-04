@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Eye, EyeOff, Globe, Laptop, Network } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 function maskIp(ip: string | undefined): string {
@@ -20,101 +20,120 @@ export const NetworkStatusPage: React.FC = () => {
   return (
     <div className="page-container">
       <div className="page-header">
-        <div>
-          <h1 className="page-title">Network Status</h1>
-          <p className="page-subtitle">
-            Detailed WAN (Internet) configuration reported by the Tenda F3 and local computer network interface parameters.
-          </p>
-        </div>
+        <h1 className="page-title">Network</h1>
         <button
           type="button"
-          className="btn btn-secondary"
+          className="btn btn-secondary btn-sm"
           onClick={() => setRevealWan((v) => !v)}
         >
-          {revealWan ? <EyeOff size={16} /> : <Eye size={16} />}
-          {revealWan ? 'Mask WAN IP Addresses' : 'Reveal WAN IP Addresses'}
+          {revealWan ? <EyeOff size={14} /> : <Eye size={14} />}
+          <span>{revealWan ? 'Mask IP' : 'Show IP'}</span>
         </button>
       </div>
 
-      <div className="grid-2">
-        {/* Router WAN Status */}
+      <div className="overview-strip">
+        <div className="overview-metric">
+          <span className="overview-metric-label">Internet</span>
+          <div className="overview-metric-value" style={{ fontSize: 15 }}>
+            <span className={`status-dot ${networkStatus?.internetConnected ? 'online' : 'danger'}`} />
+            <span>{networkStatus?.internetConnected ? 'Connected' : 'Disconnected'}</span>
+          </div>
+        </div>
+
+        <div className="overview-metric">
+          <span className="overview-metric-label">Connection Type</span>
+          <div className="overview-metric-value" style={{ fontSize: 15 }}>
+            {networkStatus?.connectionType || 'Dynamic IP'}
+          </div>
+        </div>
+
+        <div className="overview-metric">
+          <span className="overview-metric-label">WAN / Bridge IP</span>
+          <div className="overview-metric-value mono" style={{ fontSize: 15 }}>
+            {revealWan ? networkStatus?.wanIp || '0.0.0.0' : maskIp(networkStatus?.wanIp)}
+          </div>
+        </div>
+
+        <div className="overview-metric">
+          <span className="overview-metric-label">Download Rate</span>
+          <div className="overview-metric-value tabular" style={{ fontSize: 15 }}>
+            {networkStatus?.downloadSpeedKbps ?? 0} KB/s
+          </div>
+        </div>
+
+        <div className="overview-metric">
+          <span className="overview-metric-label">Upload Rate</span>
+          <div className="overview-metric-value tabular" style={{ fontSize: 15 }}>
+            {networkStatus?.uploadSpeedKbps ?? 0} KB/s
+          </div>
+        </div>
+      </div>
+
+      <div className="grid-2" style={{ alignItems: 'start' }}>
         <div className="card">
           <div className="card-header">
-            <span className="card-title">
-              <Globe size={18} color="var(--accent-primary)" />
-              Router WAN (Internet) Interface
+            <span className="card-title">WAN Interface</span>
+            <span className={`badge ${networkStatus?.internetConnected ? 'badge-success' : 'badge-danger'}`}>
+              {networkStatus?.internetConnected ? 'Active' : 'Offline'}
             </span>
-            {networkStatus?.internetConnected ? (
-              <span className="badge badge-success">● Connected</span>
-            ) : (
-              <span className="badge badge-danger">● Disconnected</span>
-            )}
           </div>
 
           <div className="kv-list">
             <div className="kv-row">
-              <span className="kv-label">WAN Status</span>
+              <span className="kv-label">Status</span>
               <span className="kv-value">{networkStatus?.connectionStatusText || 'Connected'}</span>
             </div>
             <div className="kv-row">
-              <span className="kv-label">Connection Type</span>
-              <span className="kv-value">{networkStatus?.connectionType || 'Dynamic IP (DHCP)'}</span>
-            </div>
-            <div className="kv-row">
-              <span className="kv-label">WAN IP Address</span>
+              <span className="kv-label">IP Address</span>
               <span className="kv-value mono">
                 {revealWan ? networkStatus?.wanIp || '0.0.0.0' : maskIp(networkStatus?.wanIp)}
               </span>
             </div>
             <div className="kv-row">
-              <span className="kv-label">WAN Subnet Mask</span>
+              <span className="kv-label">Subnet Mask</span>
               <span className="kv-value mono">{networkStatus?.wanSubnetMask || '255.255.255.0'}</span>
             </div>
             <div className="kv-row">
-              <span className="kv-label">WAN Default Gateway</span>
+              <span className="kv-label">Default Gateway</span>
               <span className="kv-value mono">
                 {revealWan ? networkStatus?.wanGateway || '0.0.0.0' : maskIp(networkStatus?.wanGateway)}
               </span>
             </div>
             <div className="kv-row">
-              <span className="kv-label">Primary DNS Server</span>
-              <span className="kv-value mono">{networkStatus?.primaryDns || '8.8.8.8'}</span>
+              <span className="kv-label">Primary DNS</span>
+              <span className="kv-value mono">{networkStatus?.primaryDns || '—'}</span>
             </div>
             <div className="kv-row">
-              <span className="kv-label">Secondary DNS Server</span>
-              <span className="kv-value mono">{networkStatus?.secondaryDns || '8.8.4.4'}</span>
+              <span className="kv-label">Secondary DNS</span>
+              <span className="kv-value mono">{networkStatus?.secondaryDns || '—'}</span>
             </div>
             <div className="kv-row">
-              <span className="kv-label">WAN MAC Address</span>
-              <span className="kv-value mono">{networkStatus?.wanMac || 'C8:3A:35:00:00:02'}</span>
+              <span className="kv-label">MAC Address</span>
+              <span className="kv-value mono">{networkStatus?.wanMac || '—'}</span>
             </div>
           </div>
         </div>
 
-        {/* Local Computer Adapter Info */}
         <div className="card">
           <div className="card-header">
-            <span className="card-title">
-              <Laptop size={18} color="var(--status-info)" />
-              This Computer&apos;s Network Adapter
-            </span>
-            <span className="badge badge-info">{localNet?.connectionType || 'Local LAN'}</span>
+            <span className="card-title">Local Adapter</span>
+            <span className="badge badge-neutral">{localNet?.connectionType || 'LAN'}</span>
           </div>
 
           {localNet ? (
             <div className="kv-list">
               <div className="kv-row">
-                <span className="kv-label">Interface Name</span>
+                <span className="kv-label">Interface</span>
                 <span className="kv-value">{localNet.interfaceName}</span>
               </div>
               {localNet.ssid && (
                 <div className="kv-row">
-                  <span className="kv-label">Connected Wi-Fi SSID</span>
+                  <span className="kv-label">Wi-Fi SSID</span>
                   <span className="kv-value">{localNet.ssid}</span>
                 </div>
               )}
               <div className="kv-row">
-                <span className="kv-label">Local IPv4 Address</span>
+                <span className="kv-label">IPv4 Address</span>
                 <span className="kv-value mono">{localNet.localIp}</span>
               </div>
               <div className="kv-row">
@@ -122,47 +141,21 @@ export const NetworkStatusPage: React.FC = () => {
                 <span className="kv-value mono">{localNet.subnetMask}</span>
               </div>
               <div className="kv-row">
-                <span className="kv-label">OS Default Gateway</span>
+                <span className="kv-label">Gateway</span>
                 <span className="kv-value mono">{localNet.defaultGateway}</span>
               </div>
               <div className="kv-row">
-                <span className="kv-label">Adapter MAC Address</span>
+                <span className="kv-label">MAC Address</span>
                 <span className="kv-value mono">{localNet.macAddress}</span>
               </div>
               <div className="kv-row">
-                <span className="kv-label">Configured DNS Servers</span>
-                <span className="kv-value mono">{localNet.dnsServers.join(', ')}</span>
+                <span className="kv-label">DNS Servers</span>
+                <span className="kv-value mono">{localNet.dnsServers.join(', ') || '—'}</span>
               </div>
             </div>
           ) : (
-            <div style={{ color: 'var(--text-secondary)', padding: '16px 0' }}>
-              No active local network interface details available.
-            </div>
+            <div className="empty-state">No active local network adapter detected.</div>
           )}
-        </div>
-      </div>
-
-      {/* Live Bandwidth Summary */}
-      <div className="card">
-        <div className="card-header">
-          <span className="card-title">
-            <Network size={18} color="var(--status-success)" />
-            Current WAN Throughput
-          </span>
-        </div>
-        <div className="grid-2">
-          <div>
-            <div className="stat-label">Real-Time Download Rate</div>
-            <div className="stat-value" style={{ color: 'var(--status-success)' }}>
-              {networkStatus?.downloadSpeedKbps ?? 0} <span style={{ fontSize: '15px' }}>KB/s</span>
-            </div>
-          </div>
-          <div>
-            <div className="stat-label">Real-Time Upload Rate</div>
-            <div className="stat-value" style={{ color: 'var(--status-info)' }}>
-              {networkStatus?.uploadSpeedKbps ?? 0} <span style={{ fontSize: '15px' }}>KB/s</span>
-            </div>
-          </div>
         </div>
       </div>
     </div>

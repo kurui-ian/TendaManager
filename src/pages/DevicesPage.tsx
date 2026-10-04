@@ -1,14 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import {
   Ban,
-  CheckCircle2,
-  Edit3,
-  Gauge,
-  MonitorSmartphone,
+  Check,
   Search,
-  ShieldOff,
   Sliders,
-  Wifi,
   X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -19,12 +14,12 @@ type DeviceFilter = 'all' | 'online' | 'offline' | 'blocked' | 'limited';
 
 const BANDWIDTH_PRESETS: Array<{ label: string; valueKbps: number }> = [
   { label: 'Unlimited', valueKbps: 0 },
-  { label: '256 Kbps (32 KB/s)', valueKbps: 32 },
-  { label: '512 Kbps (64 KB/s)', valueKbps: 64 },
-  { label: '1 Mbps (128 KB/s)', valueKbps: 128 },
-  { label: '2 Mbps (256 KB/s)', valueKbps: 256 },
-  { label: '5 Mbps (640 KB/s)', valueKbps: 640 },
-  { label: '10 Mbps (1280 KB/s)', valueKbps: 1280 },
+  { label: '256 Kbps', valueKbps: 32 },
+  { label: '512 Kbps', valueKbps: 64 },
+  { label: '1 Mbps', valueKbps: 128 },
+  { label: '2 Mbps', valueKbps: 256 },
+  { label: '5 Mbps', valueKbps: 640 },
+  { label: '10 Mbps', valueKbps: 1280 },
   { label: 'Custom (Mbps)', valueKbps: -1 },
 ];
 
@@ -32,19 +27,18 @@ function formatLimitLabel(limitKbps: number): string {
   if (!limitKbps || limitKbps <= 0) return 'Unlimited';
   const mbps = (limitKbps * 8) / 1024;
   if (mbps >= 1) {
-    return `${Number(mbps.toFixed(1))} Mbps (${limitKbps} KB/s)`;
+    return `${Number(mbps.toFixed(1))} Mbps`;
   }
-  return `${limitKbps * 8} Kbps (${limitKbps} KB/s)`;
+  return `${limitKbps * 8} Kbps`;
 }
 
 export const DevicesPage: React.FC = () => {
-  const { devices, refreshAllData, addToast } = useApp();
+  const { devices, refreshing, refreshAllData, addToast } = useApp();
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeFilter, setActiveFilter] = useState<DeviceFilter>('all');
   const [selectedMac, setSelectedMac] = useState<string | null>(null);
 
-  // Drawer editing state
   const [customNameInput, setCustomNameInput] = useState<string>('');
   const [downPreset, setDownPreset] = useState<number>(0);
   const [upPreset, setUpPreset] = useState<number>(0);
@@ -52,7 +46,6 @@ export const DevicesPage: React.FC = () => {
   const [customUpMbps, setCustomUpMbps] = useState<string>('2');
   const [savingBandwidth, setSavingBandwidth] = useState<boolean>(false);
 
-  // Block confirmation dialog state
   const [deviceToBlock, setDeviceToBlock] = useState<RouterDevice | null>(null);
   const [blockingInProgress, setBlockingInProgress] = useState<boolean>(false);
 
@@ -102,7 +95,7 @@ export const DevicesPage: React.FC = () => {
     if (!selectedDevice) return;
     await window.tendaApi.renameDevice(selectedDevice.macAddress, customNameInput);
     await refreshAllData();
-    addToast('success', 'Device Name Updated', `Saved friendly name for ${selectedDevice.macAddress}`);
+    addToast('success', 'Device name saved');
   };
 
   const handleSaveBandwidth = async (e: React.FormEvent) => {
@@ -113,7 +106,7 @@ export const DevicesPage: React.FC = () => {
     if (downPreset === -1) {
       const mbps = Number(customDownMbps);
       if (!Number.isFinite(mbps) || mbps <= 0 || mbps > 300) {
-        addToast('error', 'Invalid Download Limit', 'Custom download speed must be between 0.1 and 300 Mbps.');
+        addToast('error', 'Download limit must be between 0.1 and 300 Mbps.');
         return;
       }
       finalDownKbps = Math.round((mbps * 1024) / 8);
@@ -123,7 +116,7 @@ export const DevicesPage: React.FC = () => {
     if (upPreset === -1) {
       const mbps = Number(customUpMbps);
       if (!Number.isFinite(mbps) || mbps <= 0 || mbps > 300) {
-        addToast('error', 'Invalid Upload Limit', 'Custom upload speed must be between 0.1 and 300 Mbps.');
+        addToast('error', 'Upload limit must be between 0.1 and 300 Mbps.');
         return;
       }
       finalUpKbps = Math.round((mbps * 1024) / 8);
@@ -139,16 +132,12 @@ export const DevicesPage: React.FC = () => {
       });
       if (ok) {
         await refreshAllData();
-        addToast(
-          'success',
-          'Bandwidth Limits Applied',
-          `Updated QoS limits for ${selectedDevice.customName || selectedDevice.hostname}`
-        );
+        addToast('success', 'Bandwidth limits updated');
       } else {
-        addToast('error', 'Update Failed', 'Router rejected the QoS bandwidth rule.');
+        addToast('error', 'Bandwidth limits could not be updated.');
       }
     } catch (err) {
-      addToast('error', 'Bandwidth Error', err instanceof Error ? err.message : 'Failed to update bandwidth');
+      addToast('error', err instanceof Error ? err.message : 'Bandwidth limits could not be updated.');
     } finally {
       setSavingBandwidth(false);
     }
@@ -161,17 +150,13 @@ export const DevicesPage: React.FC = () => {
       const ok = await window.tendaApi.blockDevice(deviceToBlock.macAddress, deviceToBlock.hostname);
       if (ok) {
         await refreshAllData();
-        addToast(
-          'success',
-          '✓ Device blocked successfully',
-          `${deviceToBlock.customName || deviceToBlock.hostname} (${deviceToBlock.macAddress}) is now blocked from accessing the Internet.`
-        );
+        addToast('success', 'Device blocked');
         setDeviceToBlock(null);
       } else {
-        addToast('error', 'Block Failed', 'Router did not accept the MAC block request.');
+        addToast('error', 'Device could not be blocked.');
       }
     } catch (err) {
-      addToast('error', 'Block Error', err instanceof Error ? err.message : 'Failed to block device');
+      addToast('error', err instanceof Error ? err.message : 'Device could not be blocked.');
     } finally {
       setBlockingInProgress(false);
     }
@@ -182,41 +167,30 @@ export const DevicesPage: React.FC = () => {
       const ok = await window.tendaApi.unblockDevice(dev.macAddress);
       if (ok) {
         await refreshAllData();
-        addToast(
-          'success',
-          'Device Unblocked',
-          `${dev.customName || dev.hostname} (${dev.macAddress}) has been restored to Internet access.`
-        );
+        addToast('success', 'Device unblocked');
       }
     } catch (err) {
-      addToast('error', 'Unblock Error', err instanceof Error ? err.message : 'Failed to unblock device');
+      addToast('error', err instanceof Error ? err.message : 'Device could not be unblocked.');
     }
   };
 
   return (
     <div className="page-container">
       <div className="page-header">
-        <div>
-          <h1 className="page-title">Connected Devices</h1>
-          <p className="page-subtitle">
-            Inspect active and known devices, assign friendly local names, apply bandwidth limits, or block Internet access via MAC filtering.
-          </p>
-        </div>
+        <h1 className="page-title">Devices</h1>
       </div>
 
-      {/* Search & Filter Controls */}
+      {/* Filter & Search Toolbar (Directly on page, not wrapped in a card) */}
       <div
-        className="card"
         style={{
-          padding: '14px 18px',
           display: 'flex',
           flexWrap: 'wrap',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: '14px',
+          gap: 12,
         }}
       >
-        <div className="filter-tabs" role="tablist" aria-label="Device filter tabs">
+        <div className="filter-tabs" role="tablist" aria-label="Device filter">
           {(
             [
               { id: 'all', label: `All (${devices.length})` },
@@ -234,7 +208,7 @@ export const DevicesPage: React.FC = () => {
               type="button"
               role="tab"
               aria-selected={activeFilter === tab.id}
-              className={`filter-tab ${activeFilter === tab.id ? 'active' : ''}`}
+              className={`filter-tab tabular ${activeFilter === tab.id ? 'active' : ''}`}
               onClick={() => setActiveFilter(tab.id)}
             >
               {tab.label}
@@ -242,12 +216,12 @@ export const DevicesPage: React.FC = () => {
           ))}
         </div>
 
-        <div style={{ position: 'relative', minWidth: '280px', flex: '0 1 340px' }}>
+        <div style={{ position: 'relative', minWidth: 250, flex: '0 1 300px' }}>
           <Search
-            size={15}
+            size={14}
             style={{
               position: 'absolute',
-              left: '11px',
+              left: 10,
               top: '50%',
               transform: 'translateY(-50%)',
               color: 'var(--text-muted)',
@@ -256,8 +230,8 @@ export const DevicesPage: React.FC = () => {
           <input
             type="search"
             className="form-input"
-            style={{ paddingLeft: '34px', paddingTop: '7px', paddingBottom: '7px' }}
-            placeholder="Search by device name, IP, or MAC..."
+            style={{ paddingLeft: 32, paddingTop: 6, paddingBottom: 6 }}
+            placeholder="Filter by name, IP, or MAC"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -274,10 +248,10 @@ export const DevicesPage: React.FC = () => {
                 <th>IP Address</th>
                 <th>MAC Address</th>
                 <th>Connection</th>
-                <th>Live Speed</th>
-                <th>Bandwidth Limit</th>
+                <th>Rate</th>
+                <th>Limit</th>
                 <th>Status</th>
-                <th>Controls</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -288,56 +262,59 @@ export const DevicesPage: React.FC = () => {
                   style={{ cursor: 'pointer' }}
                 >
                   <td>
-                    <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <MonitorSmartphone size={16} color="var(--accent-primary)" />
-                      <span>{dev.customName || dev.hostname}</span>
-                    </div>
+                    <div style={{ fontWeight: 500 }}>{dev.customName || dev.hostname}</div>
                     {dev.customName && (
-                      <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', paddingLeft: '24px' }}>
-                        Hostname: {dev.hostname}
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {dev.hostname}
                       </div>
                     )}
                   </td>
                   <td className="mono">{dev.ipAddress}</td>
-                  <td className="mono">{dev.macAddress}</td>
-                  <td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                      <Wifi size={13} color="var(--text-secondary)" />
-                      {dev.connectionType}
-                    </span>
+                  <td className="mono" style={{ color: 'var(--text-secondary)' }}>
+                    {dev.macAddress}
                   </td>
-                  <td className="mono" style={{ fontSize: '12px' }}>
+                  <td style={{ color: 'var(--text-secondary)' }}>{dev.connectionType}</td>
+                  <td className="mono tabular">
                     {dev.online && !dev.blocked
                       ? `↓ ${dev.downloadSpeedKbps} / ↑ ${dev.uploadSpeedKbps} KB/s`
                       : '—'}
                   </td>
-                  <td>
+                  <td className="tabular">
                     {dev.downloadLimitKbps > 0 || dev.uploadLimitKbps > 0 ? (
                       <span className="badge badge-warning">
-                        ↓ {formatLimitLabel(dev.downloadLimitKbps)} / ↑ {formatLimitLabel(dev.uploadLimitKbps)}
+                        ↓ {formatLimitLabel(dev.downloadLimitKbps)} · ↑ {formatLimitLabel(dev.uploadLimitKbps)}
                       </span>
                     ) : (
-                      <span style={{ color: 'var(--text-secondary)' }}>Unlimited</span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Unlimited</span>
                     )}
                   </td>
                   <td>
                     {dev.blocked ? (
-                      <span className="badge badge-danger">Blocked</span>
+                      <span className="badge badge-danger">
+                        <span className="status-dot danger" />
+                        Blocked
+                      </span>
                     ) : dev.online ? (
-                      <span className="badge badge-success">Online</span>
+                      <span className="badge badge-success">
+                        <span className="status-dot online" />
+                        Online
+                      </span>
                     ) : (
-                      <span className="badge badge-info">Offline</span>
+                      <span className="badge badge-neutral">
+                        <span className="status-dot offline" />
+                        Offline
+                      </span>
                     )}
                   </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <div style={{ display: 'flex', gap: '8px' }}>
+                  <td onClick={(e) => e.stopPropagation()} style={{ textAlign: 'right' }}>
+                    <div style={{ display: 'inline-flex', gap: 6 }}>
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
                         onClick={() => openDeviceDrawer(dev)}
                       >
-                        <Sliders size={13} />
-                        Manage
+                        <Sliders size={12} />
+                        <span>View</span>
                       </button>
                       {dev.blocked ? (
                         <button
@@ -345,8 +322,8 @@ export const DevicesPage: React.FC = () => {
                           className="btn btn-primary btn-sm"
                           onClick={() => handleUnblockDevice(dev)}
                         >
-                          <CheckCircle2 size={13} />
-                          Unblock
+                          <Check size={12} />
+                          <span>Unblock</span>
                         </button>
                       ) : (
                         <button
@@ -354,8 +331,8 @@ export const DevicesPage: React.FC = () => {
                           className="btn btn-danger btn-sm"
                           onClick={() => setDeviceToBlock(dev)}
                         >
-                          <Ban size={13} />
-                          Block
+                          <Ban size={12} />
+                          <span>Block</span>
                         </button>
                       )}
                     </div>
@@ -364,8 +341,12 @@ export const DevicesPage: React.FC = () => {
               ))}
               {filteredDevices.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '28px', color: 'var(--text-muted)' }}>
-                    No devices match the current filter or search query.
+                  <td colSpan={8} className="empty-state">
+                    {refreshing && devices.length === 0
+                      ? 'Loading devices...'
+                      : devices.length === 0
+                      ? 'No devices connected.'
+                      : 'No matching devices.'}
                   </td>
                 </tr>
               )}
@@ -380,16 +361,16 @@ export const DevicesPage: React.FC = () => {
           <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <h2 style={{ fontSize: '18px', fontWeight: 700 }}>
+                <h2 style={{ fontSize: 16, fontWeight: 600 }}>
                   {selectedDevice.customName || selectedDevice.hostname}
                 </h2>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  Router Hostname: <span className="mono">{selectedDevice.hostname}</span>
+                <div className="mono" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                  {selectedDevice.macAddress}
                 </div>
               </div>
               <button
                 type="button"
-                className="btn btn-secondary btn-sm"
+                className="btn btn-ghost btn-sm"
                 onClick={() => setSelectedMac(null)}
                 aria-label="Close panel"
               >
@@ -398,58 +379,53 @@ export const DevicesPage: React.FC = () => {
             </div>
 
             {/* Device Details Summary */}
-            <div className="card" style={{ padding: '14px' }}>
-              <div className="kv-list">
-                <div className="kv-row">
-                  <span className="kv-label">Status</span>
-                  <span className="kv-value">
-                    {selectedDevice.blocked ? (
-                      <span className="badge badge-danger">● Blocked</span>
-                    ) : selectedDevice.online ? (
-                      <span className="badge badge-success">● Connected</span>
-                    ) : (
-                      <span className="badge badge-info">○ Offline</span>
-                    )}
-                  </span>
-                </div>
-                <div className="kv-row">
-                  <span className="kv-label">IP Address</span>
-                  <span className="kv-value mono">{selectedDevice.ipAddress}</span>
-                </div>
-                <div className="kv-row">
-                  <span className="kv-label">MAC Address</span>
-                  <span className="kv-value mono">{selectedDevice.macAddress}</span>
-                </div>
-                <div className="kv-row">
-                  <span className="kv-label">Connection</span>
-                  <span className="kv-value">{selectedDevice.connectionType}</span>
-                </div>
-                <div className="kv-row">
-                  <span className="kv-label">Download Limit</span>
-                  <span className="kv-value">{formatLimitLabel(selectedDevice.downloadLimitKbps)}</span>
-                </div>
-                <div className="kv-row">
-                  <span className="kv-label">Upload Limit</span>
-                  <span className="kv-value">{formatLimitLabel(selectedDevice.uploadLimitKbps)}</span>
-                </div>
+            <div className="kv-list" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 8 }}>
+              <div className="kv-row">
+                <span className="kv-label">Status</span>
+                <span className="kv-value">
+                  {selectedDevice.blocked ? (
+                    <span className="badge badge-danger">● Blocked</span>
+                  ) : selectedDevice.online ? (
+                    <span className="badge badge-success">● Online</span>
+                  ) : (
+                    <span className="badge badge-neutral">● Offline</span>
+                  )}
+                </span>
+              </div>
+              <div className="kv-row">
+                <span className="kv-label">Hostname</span>
+                <span className="kv-value mono">{selectedDevice.hostname}</span>
+              </div>
+              <div className="kv-row">
+                <span className="kv-label">IP Address</span>
+                <span className="kv-value mono">{selectedDevice.ipAddress}</span>
+              </div>
+              <div className="kv-row">
+                <span className="kv-label">Connection</span>
+                <span className="kv-value">{selectedDevice.connectionType}</span>
+              </div>
+              <div className="kv-row">
+                <span className="kv-label">Download Limit</span>
+                <span className="kv-value">{formatLimitLabel(selectedDevice.downloadLimitKbps)}</span>
+              </div>
+              <div className="kv-row">
+                <span className="kv-label">Upload Limit</span>
+                <span className="kv-value">{formatLimitLabel(selectedDevice.uploadLimitKbps)}</span>
               </div>
             </div>
 
-            {/* Friendly Local Naming */}
-            <div className="card" style={{ padding: '14px' }}>
-              <div className="card-header" style={{ marginBottom: '10px' }}>
-                <span className="card-title" style={{ fontSize: '14px' }}>
-                  <Edit3 size={15} color="var(--accent-primary)" />
-                  Friendly Device Name (Local)
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
+            {/* Rename Device */}
+            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 14 }}>
+              <label className="form-label" style={{ display: 'block', marginBottom: 6 }}>
+                Display Name
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
                 <input
                   type="text"
                   className="form-input"
                   value={customNameInput}
                   onChange={(e) => setCustomNameInput(e.target.value)}
-                  placeholder="e.g. Living Room TV"
+                  placeholder={selectedDevice.hostname}
                 />
                 <button
                   type="button"
@@ -459,19 +435,16 @@ export const DevicesPage: React.FC = () => {
                   Save
                 </button>
               </div>
-              <div className="form-hint" style={{ marginTop: '6px' }}>
-                Stored locally in TendaManager while preserving the router&apos;s original hostname.
-              </div>
             </div>
 
             {/* Bandwidth Control Form */}
             {!selectedDevice.blocked && (
-              <form className="card" style={{ padding: '14px' }} onSubmit={handleSaveBandwidth}>
-                <div className="card-header" style={{ marginBottom: '12px' }}>
-                  <span className="card-title" style={{ fontSize: '14px' }}>
-                    <Gauge size={15} color="var(--accent-primary)" />
-                    Bandwidth Control
-                  </span>
+              <form
+                style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 14 }}
+                onSubmit={handleSaveBandwidth}
+              >
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+                  Bandwidth Control
                 </div>
 
                 <div className="form-group">
@@ -491,7 +464,7 @@ export const DevicesPage: React.FC = () => {
 
                 {downPreset === -1 && (
                   <div className="form-group">
-                    <label className="form-label">Custom Download (Mbps)</label>
+                    <label className="form-label">Download (Mbps)</label>
                     <input
                       type="number"
                       step="0.25"
@@ -522,7 +495,7 @@ export const DevicesPage: React.FC = () => {
 
                 {upPreset === -1 && (
                   <div className="form-group">
-                    <label className="form-label">Custom Upload (Mbps)</label>
+                    <label className="form-label">Upload (Mbps)</label>
                     <input
                       type="number"
                       step="0.25"
@@ -542,13 +515,13 @@ export const DevicesPage: React.FC = () => {
                   style={{ width: '100%' }}
                   disabled={savingBandwidth}
                 >
-                  {savingBandwidth ? 'Applying QoS Rules...' : 'Apply Bandwidth Limits'}
+                  {savingBandwidth ? 'Saving...' : 'Apply Limits'}
                 </button>
               </form>
             )}
 
             {/* Block / Unblock Action */}
-            <div style={{ marginTop: 'auto', paddingTop: '8px' }}>
+            <div style={{ marginTop: 'auto', paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
               {selectedDevice.blocked ? (
                 <button
                   type="button"
@@ -556,8 +529,7 @@ export const DevicesPage: React.FC = () => {
                   style={{ width: '100%' }}
                   onClick={() => handleUnblockDevice(selectedDevice)}
                 >
-                  <ShieldOff size={16} />
-                  Unblock Internet Access
+                  Unblock Device
                 </button>
               ) : (
                 <button
@@ -566,8 +538,7 @@ export const DevicesPage: React.FC = () => {
                   style={{ width: '100%' }}
                   onClick={() => setDeviceToBlock(selectedDevice)}
                 >
-                  <Ban size={16} />
-                  Block Internet
+                  Block Internet Access
                 </button>
               )}
             </div>
@@ -575,17 +546,16 @@ export const DevicesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Block Device Confirmation Modal */}
       <ConfirmDialog
         open={Boolean(deviceToBlock)}
         title={`Block ${deviceToBlock?.customName || deviceToBlock?.hostname || 'Device'}?`}
-        description="This device will lose Internet access immediately via MAC address filtering on the Tenda F3 router."
+        description="This device will lose Internet access."
         warningItems={
           deviceToBlock
             ? [
-                `Device: ${deviceToBlock.customName || deviceToBlock.hostname}`,
-                `IP Address: ${deviceToBlock.ipAddress}`,
-                `MAC Address: ${deviceToBlock.macAddress}`,
+                `${deviceToBlock.customName || deviceToBlock.hostname}`,
+                `IP: ${deviceToBlock.ipAddress}`,
+                `MAC: ${deviceToBlock.macAddress}`,
               ]
             : undefined
         }

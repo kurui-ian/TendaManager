@@ -1,15 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Cpu,
   Download,
   KeyRound,
-  Save,
-  Settings,
-  ShieldAlert,
-  Sliders,
   Trash2,
 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
+import { ThemePreference, useApp } from '../context/AppContext';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 
 export const SettingsPage: React.FC = () => {
@@ -17,6 +12,8 @@ export const SettingsPage: React.FC = () => {
     settings,
     updateAppSettings,
     toggleSimulatorMode,
+    themeMode,
+    setThemeMode,
     addToast,
   } = useApp();
 
@@ -59,41 +56,71 @@ export const SettingsPage: React.FC = () => {
 
   const handleClearSavedCredentials = async () => {
     await window.tendaApi?.clearSavedCredentials();
-    addToast('success', 'Credentials Cleared', 'Removed saved router passwords from the Windows Credential Vault.');
+    addToast('success', 'Saved credentials cleared');
   };
 
   const handleClearAllData = async () => {
     await window.tendaApi?.clearAllAppData();
     setConfirmClearAllOpen(false);
-    addToast('info', 'All Local Data Reset', 'Cleared saved credentials, device names, and speed test history.');
+    addToast('info', 'Application data reset');
   };
 
   const handleExportLogs = async () => {
     const res = await window.tendaApi?.exportLogs();
     if (res?.saved) {
-      addToast('success', 'Logs Exported', `Saved to ${res.filePath}`);
+      addToast('success', 'Logs exported');
     }
   };
 
   return (
     <div className="page-container">
       <div className="page-header">
-        <div>
-          <h1 className="page-title">Settings</h1>
-          <p className="page-subtitle">
-            Configure desktop behavior, polling intervals, network timeouts, and stored credential security.
-          </p>
-        </div>
+        <h1 className="page-title">Settings</h1>
       </div>
 
-      <form onSubmit={handleSaveSettings} className="grid-2">
-        {/* Application Preferences */}
+      <form onSubmit={handleSaveSettings} className="grid-2" style={{ alignItems: 'start' }}>
+        {/* Application & Appearance */}
         <div className="card">
           <div className="card-header">
-            <span className="card-title">
-              <Settings size={18} color="var(--accent-primary)" />
-              Application Preferences
-            </span>
+            <span className="card-title">General & Appearance</span>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Theme</label>
+            <div className="filter-tabs" role="radiogroup" aria-label="Theme preference">
+              {(
+                [
+                  { id: 'dark', label: 'Dark' },
+                  { id: 'light', label: 'Light' },
+                  { id: 'system', label: 'System' },
+                ] as Array<{ id: ThemePreference; label: string }>
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={themeMode === opt.id}
+                  className={`filter-tab ${themeMode === opt.id ? 'active' : ''}`}
+                  onClick={() => setThemeMode(opt.id)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Refresh Interval</label>
+            <select
+              className="form-select"
+              value={pollingIntervalSeconds}
+              onChange={(e) => setPollingIntervalSeconds(Number(e.target.value) as 5 | 10 | 30 | 60)}
+            >
+              <option value={5}>5 seconds</option>
+              <option value={10}>10 seconds</option>
+              <option value={30}>30 seconds</option>
+              <option value={60}>60 seconds</option>
+            </select>
           </div>
 
           <div className="form-group">
@@ -103,7 +130,7 @@ export const SettingsPage: React.FC = () => {
                 checked={launchAtStartup}
                 onChange={(e) => setLaunchAtStartup(e.target.checked)}
               />
-              <span>Launch TendaManager automatically at Windows startup</span>
+              <span>Launch at Windows startup</span>
             </label>
           </div>
 
@@ -114,7 +141,7 @@ export const SettingsPage: React.FC = () => {
                 checked={minimizeToTray}
                 onChange={(e) => setMinimizeToTray(e.target.checked)}
               />
-              <span>Minimize to Windows System Tray when closing window</span>
+              <span>Minimize to system tray on close</span>
             </label>
           </div>
 
@@ -125,7 +152,7 @@ export const SettingsPage: React.FC = () => {
                 checked={enableNotifications}
                 onChange={(e) => setEnableNotifications(e.target.checked)}
               />
-              <span>Show desktop notifications for router and device events</span>
+              <span>Desktop notifications</span>
             </label>
           </div>
 
@@ -136,152 +163,128 @@ export const SettingsPage: React.FC = () => {
                 checked={maskWanIpByDefault}
                 onChange={(e) => setMaskWanIpByDefault(e.target.checked)}
               />
-              <span>Mask public WAN IP address by default on Dashboard</span>
+              <span>Mask WAN IP by default</span>
             </label>
           </div>
 
-          <div className="form-group" style={{ marginTop: '12px' }}>
-            <label className="form-label">Background Polling Interval</label>
-            <select
-              className="form-select"
-              value={pollingIntervalSeconds}
-              onChange={(e) => setPollingIntervalSeconds(Number(e.target.value) as 5 | 10 | 30 | 60)}
-            >
-              <option value={5}>Every 5 seconds (Fastest updates)</option>
-              <option value={10}>Every 10 seconds (Recommended)</option>
-              <option value={30}>Every 30 seconds</option>
-              <option value={60}>Every 60 seconds</option>
-            </select>
-          </div>
-
-          <button type="submit" className="btn btn-primary" style={{ marginTop: '8px' }}>
-            <Save size={16} />
-            Save Preferences
+          <button type="submit" className="btn btn-primary" style={{ marginTop: 6 }}>
+            Save Changes
           </button>
         </div>
 
-        {/* Router Connection Settings */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">
-              <Sliders size={18} color="var(--status-info)" />
-              Router Connection Parameters
-            </span>
-          </div>
+        {/* Connection & Data */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">Connection</span>
+            </div>
 
-          <div className="form-group">
-            <label className="form-label">Default Router Address</label>
-            <input
-              type="text"
-              className="form-input mono"
-              value={lastRouterAddress}
-              onChange={(e) => setLastRouterAddress(e.target.value)}
-              placeholder="192.168.0.1"
-            />
-          </div>
+            <div className="form-group">
+              <label className="form-label">Default Router Address</label>
+              <input
+                type="text"
+                className="form-input mono"
+                value={lastRouterAddress}
+                onChange={(e) => setLastRouterAddress(e.target.value)}
+                placeholder="192.168.0.1"
+              />
+            </div>
 
-          <div className="form-group">
-            <label className="form-label">HTTP Request Timeout (ms)</label>
-            <input
-              type="number"
-              min={2000}
-              max={20000}
-              step={500}
-              className="form-input mono"
-              value={requestTimeoutMs}
-              onChange={(e) => setRequestTimeoutMs(Number(e.target.value))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Automatic Request Retries</label>
-            <select
-              className="form-select"
-              value={maxRetries}
-              onChange={(e) => setMaxRetries(Number(e.target.value))}
-            >
-              <option value={0}>0 (No retries)</option>
-              <option value={1}>1 retry</option>
-              <option value={2}>2 retries (Recommended)</option>
-              <option value={3}>3 retries</option>
-            </select>
-          </div>
-
-          <div
-            style={{
-              marginTop: '14px',
-              paddingTop: '14px',
-              borderTop: '1px solid var(--border-subtle)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px',
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Cpu size={15} color="var(--accent-primary)" />
-                Local Tenda F3 Hardware Simulator
+            <div className="grid-2" style={{ gap: 12 }}>
+              <div className="form-group">
+                <label className="form-label">Timeout (ms)</label>
+                <input
+                  type="number"
+                  min={2000}
+                  max={20000}
+                  step={500}
+                  className="form-input mono"
+                  value={requestTimeoutMs}
+                  onChange={(e) => setRequestTimeoutMs(Number(e.target.value))}
+                />
               </div>
-              <div className="form-hint">
-                Run local V12.01.01.48_en firmware server on 127.0.0.1 for testing when away from router.
+
+              <div className="form-group">
+                <label className="form-label">Retries</label>
+                <select
+                  className="form-select"
+                  value={maxRetries}
+                  onChange={(e) => setMaxRetries(Number(e.target.value))}
+                >
+                  <option value={0}>0</option>
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                </select>
               </div>
             </div>
-            <button
-              type="button"
-              className={`btn btn-sm ${settings?.enableSimulatorMode ? 'btn-danger' : 'btn-secondary'}`}
-              onClick={() => toggleSimulatorMode(!settings?.enableSimulatorMode)}
+
+            <div
+              style={{
+                paddingTop: 12,
+                borderTop: '1px solid var(--border-subtle)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+              }}
             >
-              {settings?.enableSimulatorMode ? 'Disable Simulator' : 'Enable Simulator'}
-            </button>
+              <div>
+                <div style={{ fontWeight: 500, fontSize: 13 }}>Local Hardware Simulator</div>
+                <div className="form-hint">127.0.0.1 test firmware</div>
+              </div>
+              <button
+                type="button"
+                className={`btn btn-sm ${settings?.enableSimulatorMode ? 'btn-danger' : 'btn-secondary'}`}
+                onClick={() => toggleSimulatorMode(!settings?.enableSimulatorMode)}
+              >
+                {settings?.enableSimulatorMode ? 'Stop Simulator' : 'Start Simulator'}
+              </button>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">Data & Credentials</span>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleClearSavedCredentials}
+              >
+                <KeyRound size={13} />
+                <span>Clear Credentials</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleExportLogs}
+              >
+                <Download size={13} />
+                <span>Export Logs</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-danger btn-sm"
+                onClick={() => setConfirmClearAllOpen(true)}
+              >
+                <Trash2 size={13} />
+                <span>Reset App Data</span>
+              </button>
+            </div>
           </div>
         </div>
       </form>
 
-      {/* Security & Data Management */}
-      <div className="card">
-        <div className="card-header">
-          <span className="card-title">
-            <ShieldAlert size={18} color="var(--status-warning)" />
-            Data, Credentials & Security
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={handleClearSavedCredentials}
-          >
-            <KeyRound size={16} />
-            Clear Saved Router Credentials
-          </button>
-
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={handleExportLogs}
-          >
-            <Download size={16} />
-            Export Sanitized Logs
-          </button>
-
-          <button
-            type="button"
-            className="btn btn-danger"
-            onClick={() => setConfirmClearAllOpen(true)}
-          >
-            <Trash2 size={16} />
-            Reset All Local App Data
-          </button>
-        </div>
-      </div>
-
       <ConfirmDialog
         open={confirmClearAllOpen}
-        title="Reset All Local Data?"
-        description="This will log you out, clear saved credentials from the Windows Credential Vault, and remove custom device names and speed test history."
-        confirmLabel="Reset All Data"
+        title="Reset Application Data?"
+        description="This clears saved credentials, device names, and speed test history."
+        confirmLabel="Reset"
         variant="danger"
         onConfirm={handleClearAllData}
         onCancel={() => setConfirmClearAllOpen(false)}

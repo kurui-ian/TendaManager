@@ -171,12 +171,27 @@ export interface AuthCredentials {
   useSimulator?: boolean;
 }
 
+export type SpeedTestPhase =
+  | 'idle'
+  | 'connecting'
+  | 'selecting_server'
+  | 'ping'
+  | 'download'
+  | 'upload'
+  | 'calculating'
+  | 'complete'
+  | 'cancelled'
+  | 'error';
+
 export interface SpeedTestProgress {
-  phase: 'idle' | 'ping' | 'download' | 'upload' | 'complete' | 'cancelled' | 'error';
+  phase: SpeedTestPhase;
   pingMs: number | null;
   jitterMs: number | null;
   downloadMbps: number | null;
   uploadMbps: number | null;
+  currentMbps?: number | null;
+  downloadSamples?: number[];
+  uploadSamples?: number[];
   progressPercent: number;
   serverLocation: string;
   errorMessage?: string;

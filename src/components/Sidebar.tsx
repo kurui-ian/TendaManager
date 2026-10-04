@@ -1,34 +1,49 @@
 import React from 'react';
 import {
-  Activity,
   Gauge,
   Globe,
-  HelpCircle,
   LayoutDashboard,
   LogOut,
   MonitorSmartphone,
-  Moon,
   Radio,
   Router,
   Settings,
-  Stethoscope,
-  Sun,
   Wifi,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { NavPage } from '../types/ipc';
+import { TendaRouterIcon } from './TendaRouterIcon';
 
-const NAV_ITEMS: Array<{ id: NavPage; label: string; icon: React.ReactNode }> = [
-  { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
-  { id: 'devices', label: 'Connected Devices', icon: <MonitorSmartphone size={18} /> },
-  { id: 'wifi', label: 'Wi-Fi Settings', icon: <Wifi size={18} /> },
-  { id: 'repeater', label: 'Wireless Repeating', icon: <Radio size={18} /> },
-  { id: 'speedtest', label: 'Speed Test', icon: <Gauge size={18} /> },
-  { id: 'network', label: 'Network Status', icon: <Globe size={18} /> },
-  { id: 'router', label: 'Router Information', icon: <Router size={18} /> },
-  { id: 'diagnostics', label: 'Diagnostics', icon: <Stethoscope size={18} /> },
-  { id: 'settings', label: 'Settings', icon: <Settings size={18} /> },
-  { id: 'help', label: 'Help & Compatibility', icon: <HelpCircle size={18} /> },
+interface NavGroup {
+  title: string;
+  items: Array<{ id: NavPage; label: string; icon: React.ReactNode }>;
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    title: 'Main',
+    items: [{ id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> }],
+  },
+  {
+    title: 'Network',
+    items: [
+      { id: 'devices', label: 'Devices', icon: <MonitorSmartphone size={16} /> },
+      { id: 'wifi', label: 'Wi-Fi', icon: <Wifi size={16} /> },
+      { id: 'repeater', label: 'Universal Repeater', icon: <Radio size={16} /> },
+      { id: 'network', label: 'Network', icon: <Globe size={16} /> },
+    ],
+  },
+  {
+    title: 'Tools',
+    items: [{ id: 'speedtest', label: 'Speed Test', icon: <Gauge size={16} /> }],
+  },
+  {
+    title: 'System',
+    items: [
+      { id: 'router', label: 'Router', icon: <Router size={16} /> },
+      { id: 'settings', label: 'Settings', icon: <Settings size={16} /> },
+    ],
+  },
 ];
 
 export const Sidebar: React.FC = () => {
@@ -36,69 +51,79 @@ export const Sidebar: React.FC = () => {
     activePage,
     setActivePage,
     session,
+    routerInfo,
     devices,
-    wifiRelay,
+    connectionLost,
+    rebootingRouter,
     logout,
-    themeMode,
-    toggleThemeMode,
   } = useApp();
 
   const onlineCount = devices.filter((d) => d.online && !d.blocked).length;
+  const activeIp = routerInfo?.routerIp || session?.routerAddress || '192.168.0.1';
 
   return (
     <aside className="sidebar" aria-label="Main Navigation">
-      <div>
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div className="sidebar-brand">
-          <div className="brand-logo" aria-hidden="true">
-            <Activity size={20} />
+          <div className="brand-logo">
+            <TendaRouterIcon size={20} />
           </div>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div className="brand-title">TendaManager</div>
             <div className="brand-subtitle">
-              {session?.hardwareVersion || 'Tenda F3'} Desktop
+              <span
+                className={`status-dot ${
+                  rebootingRouter || connectionLost ? 'warning' : 'online'
+                }`}
+              />
+              <span className="mono" style={{ fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {rebootingRouter ? 'Restarting' : connectionLost ? 'Reconnecting' : activeIp}
+              </span>
             </div>
           </div>
         </div>
 
         <nav className="sidebar-nav">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`nav-item ${activePage === item.id ? 'active' : ''}`}
-              onClick={() => setActivePage(item.id)}
-            >
-              {item.icon}
-              <span style={{ flex: 1 }}>{item.label}</span>
-              {item.id === 'devices' && onlineCount > 0 && (
-                <span className="badge badge-info" style={{ padding: '1px 7px', fontSize: '11px' }}>
-                  {onlineCount}
-                </span>
-              )}
-              {item.id === 'repeater' && wifiRelay && wifiRelay.mode !== 'disabled' && (
-                <span className="badge badge-success" style={{ padding: '1px 6px', fontSize: '10px' }}>
-                  {wifiRelay.mode === 'client+ap' ? 'Repeater' : wifiRelay.mode.toUpperCase()}
-                </span>
-              )}
-            </button>
+          {NAV_GROUPS.map((group) => (
+            <div key={group.title} className="nav-group">
+              <div className="nav-group-label">{group.title}</div>
+              {group.items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`nav-item ${activePage === item.id ? 'active' : ''}`}
+                  onClick={() => setActivePage(item.id)}
+                >
+                  {item.icon}
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {item.id === 'devices' && onlineCount > 0 && (
+                    <span
+                      className="tabular"
+                      style={{
+                        fontSize: '11px',
+                        color: activePage === 'devices' ? 'var(--accent-primary)' : 'var(--text-muted)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {onlineCount}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
       </div>
 
       <div className="sidebar-footer">
-        <button type="button" className="nav-item" onClick={toggleThemeMode}>
-          {themeMode === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-          <span>{themeMode === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}</span>
-        </button>
-
         <button
           type="button"
           className="nav-item"
           onClick={() => logout(false)}
-          style={{ color: 'var(--status-danger)' }}
+          title="Disconnect from router"
         >
-          <LogOut size={17} />
-          <span>Log Out</span>
+          <LogOut size={15} />
+          <span>Disconnect</span>
         </button>
       </div>
     </aside>

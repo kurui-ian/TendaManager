@@ -8,9 +8,12 @@ import {
   NetworkStatus,
   RouterDevice,
   RouterInfo,
+  SpeedTestRecord,
   WifiRelayConfig,
   WifiSettings,
 } from '../types/ipc';
+
+export type ThemePreference = 'dark' | 'light' | 'system';
 
 export interface ToastMessage {
   id: string;
@@ -28,6 +31,8 @@ interface AppContextValue {
   devices: RouterDevice[];
   wifiSettings: WifiSettings | null;
   wifiRelay: WifiRelayConfig | null;
+  speedTestHistory: SpeedTestRecord[];
+  refreshSpeedTestHistory: () => Promise<void>;
   settings: AppSettings | null;
   activePage: NavPage;
   setActivePage: (page: NavPage) => void;
@@ -44,11 +49,20 @@ interface AppContextValue {
   refreshAllData: () => Promise<void>;
   triggerRouterReboot: () => Promise<boolean>;
   updateAppSettings: (partial: Partial<AppSettings>) => Promise<void>;
-  themeMode: 'dark' | 'light';
+  themeMode: ThemePreference;
+  resolvedTheme: 'dark' | 'light';
+  setThemeMode: (mode: ThemePreference) => void;
   toggleThemeMode: () => void;
 }
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
+
+function getSystemTheme(): 'dark' | 'light' {
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  return 'dark';
+}
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
@@ -59,34 +73,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [devices, setDevices] = useState<RouterDevice[]>([]);
   const [wifiSettings, setWifiSettings] = useState<WifiSettings | null>(null);
   const [wifiRelay, setWifiRelay] = useState<WifiRelayConfig | null>(null);
+  const [speedTestHistory, setSpeedTestHistory] = useState<SpeedTestRecord[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [activePage, setActivePage] = useState<NavPage>('dashboard');
   const [connectionLost, setConnectionLost] = useState<boolean>(false);
   const [rebootingRouter, setRebootingRouter] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [themeMode, setThemeMode] = useState<'dark' | 'light'>('dark');
+
+  const [themeMode, setThemeModeState] = useState<ThemePreference>(() => {
+    const saved = localStorage.getItem('tenda_theme_mode');
+    if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
+    return 'dark';
+  });
+  const [resolvedTheme, setResolvedTheme] = useState<'dark' | 'light'>('dark');
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  useEffect(() => {
+    const applyTheme = (pref: ThemePreference) => {
+      const target = pref === 'system' ? getSystemTheme() : pref;
+      setResolvedTheme(target);
+      document.documentElement.setAttribute('data-theme', target);
+    };
+
+    applyTheme(themeMode);
+
+    if (themeMode === 'system' && typeof window !== 'undefined' && window.matchMedia) {
+      const mql = window.matchMedia('(prefers-color-scheme: light)');
+      const handler = () => applyTheme('system');
+      mql.addEventListener('change', handler);
+      return () => mql.removeEventListener('change', handler);
+    }
+  }, [themeMode]);
+
+  const setThemeMode = useCallback((mode: ThemePreference) => {
+    localStorage.setItem('tenda_theme_mode', mode);
+    setThemeModeState(mode);
+  }, []);
+
+  const toggleThemeMode = useCallback(() => {
+    setThemeModeState((prev) => {
+      const currentResolved = prev === 'system' ? getSystemTheme() : prev;
+      const next: ThemePreference = currentResolved === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('tenda_theme_mode', next);
+      return next;
+    });
+  }, []);
+
   const addToast = useCallback((type: ToastMessage['type'], title: string, message?: string) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    setToasts((prev) => [...prev.slice(-4), { id, type, title, message }]);
+    setToasts((prev) => [...prev.slice(-3), { id, type, title, message }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 5000);
+    }, 4500);
   }, []);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const toggleThemeMode = useCallback(() => {
-    setThemeMode((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', next);
-      return next;
-    });
+  const refreshSpeedTestHistory = useCallback(async () => {
+    if (!window.tendaApi) return;
+    try {
+      const records = await window.tendaApi.getSpeedTestHistory();
+      setSpeedTestHistory(records);
+    } catch {
+      // Ignore
+    }
   }, []);
 
   const refreshAllData = useCallback(async () => {
@@ -109,13 +163,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       if (connectionLost) {
         setConnectionLost(false);
-        addToast('success', 'Router Reconnected', `Connected to ${info.routerIp}`);
+        addToast('success', 'Reconnected', info.routerIp);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (/session expired|not authenticated/i.test(msg)) {
         setSession(null);
-        addToast('warning', 'Session Expired', 'Please sign in to your router again.');
+        addToast('warning', 'Session expired', 'Sign in again to continue.');
       } else {
         setConnectionLost(true);
       }
@@ -132,7 +186,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDiscovery(result);
       return result;
     } catch (err) {
-      addToast('error', 'Discovery Failed', err instanceof Error ? err.message : 'Network error');
+      addToast('error', 'Unable to detect router', err instanceof Error ? err.message : undefined);
       return null;
     } finally {
       setDiscovering(false);
@@ -155,11 +209,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setDevices([]);
           setWifiRelay(null);
         } else {
-          addToast(
-            'info',
-            'Tenda F3 Hardware Simulator Active',
-            `Running local Tenda F3 V12.01.01.48_en firmware at ${res.simulatorUrl} (Default password: admin)`
-          );
+          addToast('info', 'Simulator active', `${res.simulatorUrl} (password: admin)`);
         }
         return res;
       } finally {
@@ -179,36 +229,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setConnectionLost(false);
           const updatedSettings = await window.tendaApi.getSettings();
           setSettings(updatedSettings);
-          await refreshAllData();
-          addToast('success', 'Authenticated', `Logged into ${res.session.routerAddress} (${res.session.adapterName})`);
+          await Promise.all([refreshAllData(), refreshSpeedTestHistory()]);
           return { success: true };
         }
-        return { success: false, errorMessage: res.errorMessage || 'Authentication failed' };
+        return { success: false, errorMessage: res.errorMessage || 'Unable to authenticate with router.' };
       } catch (err) {
         return {
           success: false,
-          errorMessage: err instanceof Error ? err.message : 'Login error',
+          errorMessage: err instanceof Error ? err.message : 'Unable to connect to the router.',
         };
       }
     },
-    [refreshAllData, addToast]
+    [refreshAllData, refreshSpeedTestHistory]
   );
 
-  const logout = useCallback(
-    async (clearSaved = false) => {
-      if (!window.tendaApi) return;
-      await window.tendaApi.logout(clearSaved);
-      setSession(null);
-      setRouterInfo(null);
-      setNetworkStatus(null);
-      setDevices([]);
-      setWifiSettings(null);
-      setWifiRelay(null);
-      setConnectionLost(false);
-      addToast('info', 'Logged Out', 'Router session closed.');
-    },
-    [addToast]
-  );
+  const logout = useCallback(async (clearSaved = false) => {
+    if (!window.tendaApi) return;
+    await window.tendaApi.logout(clearSaved);
+    setSession(null);
+    setRouterInfo(null);
+    setNetworkStatus(null);
+    setDevices([]);
+    setWifiSettings(null);
+    setWifiRelay(null);
+    setConnectionLost(false);
+  }, []);
 
   const triggerRouterReboot = useCallback(async (): Promise<boolean> => {
     if (!window.tendaApi) return false;
@@ -217,18 +262,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const ok = await window.tendaApi.restartRouter();
       if (!ok) {
         setRebootingRouter(false);
-        addToast('error', 'Reboot Failed', 'Router did not accept the restart command.');
+        addToast('error', 'Unable to restart router');
         return false;
       }
 
-      addToast('info', 'Restarting Router', 'Waiting for Tenda F3 to reboot and come back online...');
-      // Wait and poll until router responds again
+      addToast('info', 'Restarting router...');
       for (let i = 0; i < 15; i++) {
         await new Promise((r) => setTimeout(r, 2000));
         try {
           await refreshAllData();
           setRebootingRouter(false);
-          addToast('success', 'Router Online', 'Tenda F3 has finished restarting.');
+          addToast('success', 'Router online');
           return true;
         } catch {
           // Keep waiting
@@ -238,7 +282,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return true;
     } catch (err) {
       setRebootingRouter(false);
-      addToast('error', 'Reboot Error', err instanceof Error ? err.message : 'Failed to restart');
+      addToast('error', 'Restart failed', err instanceof Error ? err.message : undefined);
       return false;
     }
   }, [refreshAllData, addToast]);
@@ -248,21 +292,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!window.tendaApi) return;
       const updated = await window.tendaApi.updateSettings(partial);
       setSettings(updated);
-      addToast('success', 'Settings Saved', 'Your preferences have been updated.');
+      addToast('success', 'Settings saved');
     },
     [addToast]
   );
 
-  // Initial startup flow: load settings, run router discovery, attempt auto-login if credentials saved
   useEffect(() => {
     if (!window.tendaApi) return;
     let mounted = true;
 
     (async () => {
       try {
-        const loadedSettings = await window.tendaApi.getSettings();
+        const [loadedSettings, historyRecords] = await Promise.all([
+          window.tendaApi.getSettings(),
+          window.tendaApi.getSpeedTestHistory(),
+        ]);
         if (!mounted) return;
         setSettings(loadedSettings);
+        setSpeedTestHistory(historyRecords);
 
         const disc = await window.tendaApi.discoverRouter();
         if (!mounted) return;
@@ -303,7 +350,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [refreshAllData]);
 
-  // Periodic polling while authenticated
   useEffect(() => {
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current);
@@ -338,6 +384,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         devices,
         wifiSettings,
         wifiRelay,
+        speedTestHistory,
+        refreshSpeedTestHistory,
         settings,
         activePage,
         setActivePage,
@@ -355,6 +403,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         triggerRouterReboot,
         updateAppSettings,
         themeMode,
+        resolvedTheme,
+        setThemeMode,
         toggleThemeMode,
       }}
     >
