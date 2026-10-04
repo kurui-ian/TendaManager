@@ -1,11 +1,38 @@
 export type F3HardwareVersion = 'F3 v2.0' | 'F3 v3.0' | 'F3 v4.0' | 'F3 v5.0' | 'Tenda F3 (Generic)';
 
+export type WifiRelayMode = 'disabled' | 'wisp' | 'client+ap' | 'ap';
+
+export type WifiRelayConnectStatus = 'bridgeSuccess' | 'disconnect' | 'pwdError';
+
+export interface WifiRelayConfig {
+  wifiEnabled: boolean;
+  mode: WifiRelayMode;
+  upstreamSsid: string;
+  upstreamMac: string;
+  upstreamChannel: string | number;
+  upstreamSecurityMode: string;
+  upstreamPassword?: string;
+  connectStatus: WifiRelayConnectStatus;
+  signalStrengthDbm?: number | null;
+  extenderSsid?: string;
+}
+
+export interface WifiScanNetwork {
+  ssid: string;
+  macAddress: string;
+  channel: number;
+  securityMode: string;
+  signalStrengthDbm: number;
+  signalPercent: number;
+}
+
 export interface RouterCapabilities {
   canViewDevices: boolean;
   canBlockDevices: boolean;
   canControlBandwidth: boolean;
   canChangeWifi: boolean;
   canHideSsid: boolean;
+  canWirelessRepeating: boolean;
   canReboot: boolean;
   canViewWanStatus: boolean;
   canViewUptime: boolean;
@@ -23,6 +50,7 @@ export interface RouterInfo {
   uptimeSeconds: number | null;
   systemTime: string | null;
   online: boolean;
+  operatingMode: WifiRelayMode;
   capabilities: RouterCapabilities;
 }
 
@@ -35,9 +63,23 @@ export interface NetworkStatus {
   primaryDns: string;
   secondaryDns: string;
   wanMac: string;
-  connectionType: 'Dynamic IP (DHCP)' | 'PPPoE' | 'Static IP' | 'Bridge / AP' | 'Unknown';
+  connectionType:
+    | 'Dynamic IP (DHCP)'
+    | 'PPPoE'
+    | 'Static IP'
+    | 'Universal Repeater (Client + AP)'
+    | 'Universal Repeater'
+    | 'WISP Mode'
+    | 'Access Point (AP)'
+    | 'AP Mode'
+    | 'Bridge / AP'
+    | 'Unknown';
   uploadSpeedKbps: number;
   downloadSpeedKbps: number;
+  operatingMode?: WifiRelayMode;
+  upstreamSsid?: string;
+  wifiRateDbm?: number | null;
+  upstreamSignalDbm?: number | null;
 }
 
 export interface RouterDevice {
@@ -100,6 +142,10 @@ export interface DiscoveryResult {
   detectedHardwareVersion: F3HardwareVersion | null;
   recommendedAdapter: string | null;
   requiresUsername: boolean;
+  hasLoginPassword?: boolean;
+  operatingMode?: WifiRelayMode;
+  upstreamSsid?: string;
+  extenderSsid?: string;
   nonTendaVendorHint: string | null;
   simulatorActive: boolean;
   simulatorUrl?: string;
@@ -114,6 +160,7 @@ export interface AuthSession {
   loggedInAt: string;
   sessionCookiePreview: string;
   isSimulator: boolean;
+  hasLoginPassword?: boolean;
 }
 
 export interface AuthCredentials {
@@ -179,6 +226,7 @@ export type NavPage =
   | 'dashboard'
   | 'devices'
   | 'wifi'
+  | 'repeater'
   | 'speedtest'
   | 'network'
   | 'router'
@@ -215,6 +263,12 @@ export interface TendaDesktopApi {
 
   getWifiSettings: () => Promise<WifiSettings>;
   updateWifiSettings: (settings: WifiSettings) => Promise<boolean>;
+  getWifiRelayConfig: () => Promise<WifiRelayConfig>;
+  scanWifiNetworks: () => Promise<WifiScanNetwork[]>;
+  setWifiRelayConfig: (config: Partial<WifiRelayConfig> & { mode: WifiRelayMode }) => Promise<{
+    applied: boolean;
+    requiresReboot: boolean;
+  }>;
 
   runSpeedTest: () => Promise<SpeedTestRecord | null>;
   cancelSpeedTest: () => Promise<{ cancelled: boolean }>;

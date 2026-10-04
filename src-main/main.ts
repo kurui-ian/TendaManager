@@ -12,7 +12,7 @@ import { credentialStore } from './storage/credentialStore';
 import { tendaSimulator } from './router/simulatorServer';
 import { TrayManager } from './tray/trayManager';
 import { logger } from './logger/logger';
-import { AppSettings, AuthCredentials, BandwidthRule, WifiSettings } from './router/types';
+import { AppSettings, AuthCredentials, BandwidthRule, WifiRelayMode, WifiSettings } from './router/types';
 
 let mainWindow: BrowserWindow | null = null;
 let trayManager: TrayManager | null = null;
@@ -149,7 +149,7 @@ function registerIpcHandlers(): void {
     return deviceService.setBandwidthRule(rule);
   });
 
-  // Wi-Fi Management
+  // Wi-Fi Management & Wireless Repeating (Universal Repeater / WISP / AP)
   ipcMain.handle('wifi:get-settings', async () => {
     return wifiService.getWifiSettings();
   });
@@ -157,6 +157,31 @@ function registerIpcHandlers(): void {
   ipcMain.handle('wifi:update-settings', async (_evt, settings: WifiSettings) => {
     return wifiService.updateWifiSettings(settings);
   });
+
+  ipcMain.handle('wifi:get-relay', async () => {
+    return wifiService.getWifiRelayConfig();
+  });
+
+  ipcMain.handle('wifi:scan-networks', async () => {
+    return wifiService.scanWifiNetworks();
+  });
+
+  ipcMain.handle(
+    'wifi:set-relay',
+    async (
+      _evt,
+      config: {
+        mode: WifiRelayMode;
+        upstreamSsid?: string;
+        upstreamMac?: string;
+        upstreamChannel?: string;
+        upstreamSecurityMode?: string;
+        upstreamPassword?: string;
+      }
+    ) => {
+      return wifiService.setWifiRelayConfig(config);
+    }
+  );
 
   // Speed Test
   ipcMain.handle('speedtest:run', async () => {

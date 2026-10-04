@@ -9,13 +9,14 @@ import {
   Globe,
   MonitorSmartphone,
   Power,
+  Radio,
   Router,
   ShieldAlert,
-  Stethoscope,
   Wifi,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { MODE_LABELS } from './RepeaterPage';
 
 function formatUptime(seconds: number | null | undefined): string {
   if (!seconds || seconds <= 0) return 'Available on Router';
@@ -42,6 +43,7 @@ export const DashboardPage: React.FC = () => {
     networkStatus,
     devices,
     wifiSettings,
+    wifiRelay,
     settings,
     setActivePage,
     triggerRouterReboot,
@@ -67,10 +69,18 @@ export const DashboardPage: React.FC = () => {
         <div>
           <h1 className="page-title">Network Dashboard</h1>
           <p className="page-subtitle">
-            Centralized real-time overview of your {routerInfo?.model || 'Tenda F3'} router, connected devices, and Internet link.
+            Centralized real-time overview of your {routerInfo?.model || 'Tenda F3'} router, connected devices, and wireless repeating status.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setActivePage('repeater')}
+          >
+            <Radio size={16} />
+            Wireless Repeating
+          </button>
           <button
             type="button"
             className="btn btn-secondary"
@@ -162,15 +172,17 @@ export const DashboardPage: React.FC = () => {
               <span className="kv-value">{routerInfo?.model || 'Tenda F3'}</span>
             </div>
             <div className="kv-row">
-              <span className="kv-label">Hardware Variant</span>
-              <span className="kv-value">{routerInfo?.hardwareVersion || 'F3 v3.0'}</span>
+              <span className="kv-label">Operating Mode</span>
+              <span className="kv-value" style={{ color: 'var(--accent-primary)' }}>
+                {wifiRelay ? MODE_LABELS[wifiRelay.mode] : 'Router Mode'}
+              </span>
             </div>
             <div className="kv-row">
               <span className="kv-label">Firmware Version</span>
               <span className="kv-value mono">{routerInfo?.firmwareVersion || 'V12.01.01.xx'}</span>
             </div>
             <div className="kv-row">
-              <span className="kv-label">Gateway IP</span>
+              <span className="kv-label">Management IP</span>
               <span className="kv-value mono">{routerInfo?.routerIp || '192.168.0.1'}</span>
             </div>
             <div className="kv-row">
@@ -180,12 +192,12 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Internet Status Card */}
+        {/* Internet / Repeater Bridge Status Card */}
         <div className="card">
           <div className="card-header">
             <span className="card-title">
               <Globe size={18} color="var(--status-info)" />
-              Internet Status
+              Internet & Uplink Status
             </span>
             {networkStatus?.internetConnected ? (
               <span className="badge badge-success">● Connected</span>
@@ -196,7 +208,7 @@ export const DashboardPage: React.FC = () => {
 
           <div className="kv-list">
             <div className="kv-row">
-              <span className="kv-label">WAN IP Address</span>
+              <span className="kv-label">WAN / Bridge IP</span>
               <span className="kv-value mono" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 {displayedWanIp}
                 <button
@@ -219,12 +231,22 @@ export const DashboardPage: React.FC = () => {
               <span className="kv-label">Connection Type</span>
               <span className="kv-value">{networkStatus?.connectionType || 'Dynamic IP (DHCP)'}</span>
             </div>
-            <div className="kv-row">
-              <span className="kv-label">DNS Servers</span>
-              <span className="kv-value mono">
-                {networkStatus?.primaryDns || '8.8.8.8'}, {networkStatus?.secondaryDns || '1.1.1.1'}
-              </span>
-            </div>
+            {wifiRelay && (wifiRelay.mode === 'client+ap' || wifiRelay.mode === 'wisp') ? (
+              <div className="kv-row">
+                <span className="kv-label">Upstream Base Wi-Fi</span>
+                <span className="kv-value">
+                  {wifiRelay.upstreamSsid || 'None'}{' '}
+                  {wifiRelay.signalStrengthDbm ? `(${wifiRelay.signalStrengthDbm} dBm)` : ''}
+                </span>
+              </div>
+            ) : (
+              <div className="kv-row">
+                <span className="kv-label">DNS Servers</span>
+                <span className="kv-value mono">
+                  {networkStatus?.primaryDns || '8.8.8.8'}, {networkStatus?.secondaryDns || '1.1.1.1'}
+                </span>
+              </div>
+            )}
             <div className="kv-row">
               <span className="kv-label">Live Download Rate</span>
               <span className="kv-value" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
@@ -254,7 +276,7 @@ export const DashboardPage: React.FC = () => {
 
           <div className="kv-list" style={{ marginBottom: '16px' }}>
             <div className="kv-row">
-              <span className="kv-label">Network Name (SSID)</span>
+              <span className="kv-label">Local Broadcast SSID</span>
               <span className="kv-value">{wifiSettings?.ssid || 'Tenda_F3'}</span>
             </div>
             <div className="kv-row">
@@ -262,8 +284,16 @@ export const DashboardPage: React.FC = () => {
               <span className="kv-value">{wifiSettings?.securityMode || 'WPA/WPA2-PSK'}</span>
             </div>
             <div className="kv-row">
-              <span className="kv-label">SSID Broadcast</span>
-              <span className="kv-value">{wifiSettings?.hideSsid ? 'Hidden' : 'Visible'}</span>
+              <span className="kv-label">Repeating Status</span>
+              <span className="kv-value">
+                {wifiRelay?.mode === 'client+ap'
+                  ? `Universal Repeater (${wifiRelay.connectStatus === 'bridgeSuccess' ? 'Bridged' : wifiRelay.connectStatus})`
+                  : wifiRelay?.mode === 'wisp'
+                  ? `WISP (${wifiRelay.connectStatus === 'bridgeSuccess' ? 'Bridged' : wifiRelay.connectStatus})`
+                  : wifiRelay?.mode === 'ap'
+                  ? 'Wired AP Mode'
+                  : 'Disabled'}
+              </span>
             </div>
           </div>
 
@@ -279,10 +309,10 @@ export const DashboardPage: React.FC = () => {
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              onClick={() => setActivePage('diagnostics')}
+              onClick={() => setActivePage('repeater')}
             >
-              <Stethoscope size={14} />
-              Diagnostics
+              <Radio size={14} />
+              Universal Repeater
             </button>
             <button
               type="button"

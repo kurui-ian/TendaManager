@@ -3,6 +3,7 @@ import {
   AuthSession,
   DiscoveryResult,
   F3HardwareVersion,
+  WifiRelayMode,
 } from '../router/types';
 import { TendaF3BaseAdapter } from '../router/tendaF3BaseAdapter';
 import { AdapterFactory } from '../router/adapterFactory';
@@ -106,7 +107,7 @@ export class AuthenticationService {
     const authenticated = await adapter.authenticate({
       routerAddress: targetAddress,
       username: credentials.username || 'admin',
-      password: credentials.password,
+      password: credentials.password || '',
     });
 
     if (!authenticated) {
@@ -117,11 +118,17 @@ export class AuthenticationService {
       };
     }
 
-    // Query router info to finalize firmware/hardware details
     let firmwareVersion = probe.firmware || 'V12.01.01.xx';
+    let operatingMode: WifiRelayMode = probe.operatingMode || 'disabled';
+    let hasLoginPassword = probe.hasLoginPassword;
+
     try {
       const info = await adapter.getRouterInfo();
       firmwareVersion = info.firmwareVersion;
+      operatingMode = info.operatingMode;
+      if (info.hasLoginPassword !== undefined) {
+        hasLoginPassword = info.hasLoginPassword;
+      }
     } catch {
       // Non-fatal
     }
@@ -133,6 +140,8 @@ export class AuthenticationService {
       adapterName: adapter.adapterName,
       hardwareVersion: adapter.hardwareVersion,
       firmwareVersion,
+      operatingMode,
+      hasLoginPassword,
       loggedInAt: new Date().toISOString(),
       sessionCookiePreview: adapter.getSessionCookiePreview(),
       isSimulator: tendaSimulator.isRunning() && targetAddress.includes('127.0.0.1'),
@@ -144,11 +153,14 @@ export class AuthenticationService {
       onboardingCompleted: true,
     });
 
-    if (credentials.rememberSession) {
+    if (credentials.rememberSession && credentials.password) {
       credentialStore.saveCredentials(targetAddress, credentials.password, credentials.username);
     }
 
-    logger.info('AuthenticationService', `Logged in to ${targetAddress} using ${adapter.adapterName}`);
+    logger.info(
+      'AuthenticationService',
+      `Logged in to ${targetAddress} using ${adapter.adapterName} (Mode: ${operatingMode})`
+    );
     return {
       success: true,
       session: this.currentSession,

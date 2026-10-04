@@ -56,7 +56,7 @@ describe('Tenda F3 Router Adapters (v2, v3, v4, v5) Integration Suite', () => {
     const net = await v3.getNetworkStatus();
     expect(net.internetConnected).toBe(true);
     expect(net.wanIp).toBe('105.163.42.198');
-    expect(net.connectionType).toBe('Dynamic IP (DHCP)');
+    expect(net.connectionType).toBe('Universal Repeater (Client + AP)');
 
     // Also test F3V4Adapter which negotiates MD5 auth
     const v4 = AdapterFactory.createAdapter('F3 v4.0');
@@ -148,6 +148,50 @@ describe('Tenda F3 Router Adapters (v2, v3, v4, v5) Integration Suite', () => {
     expect(updatedWifi.securityMode).toBe('WPA2-PSK');
     expect(updatedWifi.password).toBe('NewSecurePassword99!');
     expect(updatedWifi.hideSsid).toBe(true);
+  });
+
+  it('scans nearby Wi-Fi networks and configures Universal Repeater (client+ap), WISP, AP, and Disabled modes', async () => {
+    const adapter = AdapterFactory.createAdapter('F3 v3.0');
+    await adapter.authenticate({
+      routerAddress: simUrl,
+      password: 'TendaAdmin2026',
+    });
+
+    const initialRelay = await adapter.getWifiRelayConfig();
+    expect(initialRelay.mode).toBe('client+ap');
+
+    // Switch to Disabled (Router Mode) first
+    expect(await adapter.setWifiRelayConfig({ mode: 'disabled' })).toBe(true);
+    const disabledRelay = await adapter.getWifiRelayConfig();
+    expect(disabledRelay.mode).toBe('disabled');
+    const netInRouterMode = await adapter.getNetworkStatus();
+    expect(netInRouterMode.connectionType).toBe('Dynamic IP (DHCP)');
+
+    // Scan nearby Wi-Fi networks
+    const scanned = await adapter.scanWifiNetworks();
+    expect(scanned.length).toBeGreaterThanOrEqual(2);
+    expect(scanned[0].ssid).toBe('Fiber_Upstream_WiFi');
+    expect(scanned[0].signalPercent).toBeGreaterThan(70);
+
+    // Configure Universal Repeater (client+ap) bridging to "Fiber_Upstream_WiFi"
+    const applyOk = await adapter.setWifiRelayConfig({
+      mode: 'client+ap',
+      upstreamSsid: scanned[0].ssid,
+      upstreamMac: scanned[0].macAddress,
+      upstreamChannel: scanned[0].channel,
+      upstreamSecurityMode: scanned[0].securityMode,
+      upstreamPassword: 'UpstreamWifiPassword123',
+    });
+    expect(applyOk).toBe(true);
+
+    const updatedRelay = await adapter.getWifiRelayConfig();
+    expect(updatedRelay.mode).toBe('client+ap');
+    expect(updatedRelay.upstreamSsid).toBe('Fiber_Upstream_WiFi');
+    expect(updatedRelay.connectStatus).toBe('bridgeSuccess');
+
+    const netInRepeater = await adapter.getNetworkStatus();
+    expect(netInRepeater.connectionType).toBe('Universal Repeater (Client + AP)');
+    expect(netInRepeater.internetConnected).toBe(true);
   });
 
   it('executes router diagnostics and reboot command', async () => {

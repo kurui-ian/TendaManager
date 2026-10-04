@@ -9,6 +9,9 @@ import {
   RouterCapabilities,
   RouterDevice,
   RouterInfo,
+  WifiRelayConfig,
+  WifiRelayMode,
+  WifiScanNetwork,
   WifiSecurityMode,
   WifiSettings,
 } from './types';
@@ -36,9 +39,20 @@ interface TendaQosBlackItem {
 }
 
 interface TendaQosResponse {
-  localhost?: { localhost?: string; mac?: string };
+  localhost?: { localhost?: string; mac?: string; lanMask?: string };
   onlineList?: TendaQosOnlineItem[];
   blackList?: TendaQosBlackItem[];
+  macFilter?: { curFilterMode?: string };
+}
+
+export function dbmToSignalPercent(dbm: number): number {
+  if (dbm >= -30) return 100;
+  if (dbm >= -45) return Math.round(100 - (-30 - dbm) / 1.5);
+  if (dbm >= -55) return Math.round(90 - (-45 - dbm) * 2);
+  if (dbm >= -70) return Math.round(70 - (-55 - dbm) * 2);
+  if (dbm >= -85) return Math.round(40 - (-70 - dbm) * 2);
+  if (dbm >= -95) return Math.round(10 - (-85 - dbm));
+  return 0;
 }
 
 export abstract class TendaF3BaseAdapter implements RouterAdapter {
@@ -50,12 +64,16 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
   protected authenticated = false;
   protected lastCredentials: { username: string; password: string } | null = null;
   protected detectedFirmware = 'V12.01.01.xx';
+  protected operatingMode: WifiRelayMode = 'disabled';
+  protected hasLoginPassword = true;
+
   protected capabilities: RouterCapabilities = {
     canViewDevices: true,
     canBlockDevices: true,
     canControlBandwidth: true,
     canChangeWifi: true,
     canHideSsid: true,
+    canWirelessRepeat: true,
     canReboot: true,
     canViewWanStatus: true,
     canViewUptime: true,
@@ -111,9 +129,42 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
     this.client.clearCookies();
 
     const username = credentials.username?.trim() || 'admin';
-    const password = credentials.password;
+    const password = credentials.password || '';
 
-    // Order of auth encodings to try based on adapter preference
+    // Check if the router has no login password configured (hasLoginPwd === "false")
+    try {
+      const homeCheck = await this.client.getJson<Record<string, unknown>>(
+        `/goform/getHomePageInfo?random=${Math.random()}&modules=loginAuth,wifiRelay`
+      );
+      const loginAuth = (homeCheck.data?.loginAuth || {}) as Record<string, string>;
+      const relay = (homeCheck.data?.wifiRelay || {}) as Record<string, string>;
+      if (relay.wifiRelayType) {
+        this.operatingMode = relay.wifiRelayType as WifiRelayMode;
+      }
+
+      if (!homeCheck.sessionExpired && loginAuth.hasLoginPwd === 'false' && !password) {
+        const statusVerify = await this.client.getJson<Record<string, unknown>>(
+          `/goform/getStatus?random=${Math.random()}&modules=systemInfo,internetStatus,wifiRelay`
+        );
+        if (!statusVerify.sessionExpired && statusVerify.data?.systemInfo) {
+          this.authenticated = true;
+          this.hasLoginPassword = false;
+          this.lastCredentials = { username, password: '' };
+          const sysInfo = (statusVerify.data.systemInfo || {}) as Record<string, string>;
+          if (sysInfo.softVersion) {
+            this.detectedFirmware = sysInfo.softVersion;
+          }
+          logger.info(
+            this.adapterName,
+            `Authenticated with ${this.routerAddress} (No router admin password configured)`
+          );
+          return true;
+        }
+      }
+    } catch {
+      // Proceed to standard /login/Auth flow
+    }
+
     const methodsToTry: Array<'base64' | 'md5' | 'plain-form'> = [this.capabilities.authMethod];
     if (!methodsToTry.includes('base64')) methodsToTry.push('base64');
     if (!methodsToTry.includes('md5')) methodsToTry.push('md5');
@@ -121,9 +172,10 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
     for (const method of methodsToTry) {
       const encodedPassword = this.encodePassword(password, method);
 
-      // Tenda F3 eCos sets cookie ecos_pw or submits /login/Auth
       this.client.setCookie('bLanguage', 'en');
-      this.client.setCookie('ecos_pw', `${encodedPassword}`);
+      if (password) {
+        this.client.setCookie('ecos_pw', `${encodedPassword}`);
+      }
 
       try {
         const authRes = await this.client.postForm('/login/Auth', {
@@ -136,9 +188,8 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
           /loginError|password error|wrong password/i.test(authRes.body);
 
         if (!redirectedToLogin) {
-          // Verify authenticated session by querying /goform/getStatus
           const verify = await this.client.getJson<Record<string, unknown>>(
-            `/goform/getStatus?random=${Math.random()}&modules=systemInfo,internetStatus`
+            `/goform/getStatus?random=${Math.random()}&modules=systemInfo,internetStatus,wifiRelay`
           );
 
           if (!verify.sessionExpired && verify.data && (verify.data.systemInfo || verify.data.internetStatus)) {
@@ -146,8 +197,12 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
             this.capabilities.authMethod = method;
             this.lastCredentials = { username, password };
             const sysInfo = (verify.data.systemInfo || {}) as Record<string, string>;
+            const relay = (verify.data.wifiRelay || {}) as Record<string, string>;
             if (sysInfo.softVersion) {
               this.detectedFirmware = sysInfo.softVersion;
+            }
+            if (relay.wifiRelayType) {
+              this.operatingMode = relay.wifiRelayType as WifiRelayMode;
             }
             logger.info(this.adapterName, `Authenticated successfully with ${this.routerAddress} (${method})`);
             return true;
@@ -166,7 +221,7 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
   public async disconnect(): Promise<void> {
     try {
       if (this.authenticated) {
-        await this.client.request('GET', '/goform/loginOut').catch(() => undefined);
+        await this.client.postForm('/goform/loginOut', { action: 'loginout' }).catch(() => undefined);
       }
     } finally {
       this.authenticated = false;
@@ -176,8 +231,27 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
     }
   }
 
-  protected async getJsonWithAutoRenew<T = Record<string, unknown>>(endpointPath: string): Promise<T> {
-    let result = await this.client.getJson<T>(endpointPath);
+  protected async getJsonWithAutoRenew<T = Record<string, unknown>>(
+    endpointPath: string,
+    customTimeoutMs?: number
+  ): Promise<T> {
+    const res = customTimeoutMs
+      ? await this.client.request('GET', endpointPath, undefined, customTimeoutMs)
+      : null;
+
+    let result = res
+      ? (() => {
+          try {
+            return {
+              data: JSON.parse(res.body.trim()) as T,
+              sessionExpired: false,
+            };
+          } catch {
+            return { data: null, sessionExpired: /login/i.test(res.redirectLocation || res.body) };
+          }
+        })()
+      : await this.client.getJson<T>(endpointPath);
+
     if (result.sessionExpired && this.lastCredentials) {
       logger.info(this.adapterName, 'Router session expired; attempting automatic session renewal');
       const renewed = await this.authenticate({
@@ -204,27 +278,44 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
 
   public async getRouterInfo(): Promise<RouterInfo> {
     const data = await this.getJsonWithAutoRenew<Record<string, unknown>>(
-      `/goform/getStatus?random=${Math.random()}&modules=systemInfo,internetStatus,deviceStatistics,sysTime`
+      `/goform/getStatus?random=${Math.random()}&modules=internetStatus,deviceStatistics,systemInfo,wanAdvCfg,wifiRelay,sysTime`
     );
 
     const sysInfo = (data.systemInfo || {}) as Record<string, string>;
     const inet = (data.internetStatus || {}) as Record<string, string>;
+    const wanAdv = (data.wanAdvCfg || {}) as Record<string, string>;
+    const relay = (data.wifiRelay || {}) as Record<string, string>;
+    const devStats = ((data.deviceStastics || data.deviceStatistics) || {}) as Record<string, string>;
     const sysTime = (data.sysTime || {}) as Record<string, string>;
 
     const firmware = sysInfo.softVersion || this.detectedFirmware || 'V12.01.01.xx';
     this.detectedFirmware = firmware;
 
-    const uptimeRaw = Number(sysInfo.runTime || inet.wanConnectTime || 0);
+    const mode: WifiRelayMode = (relay.wifiRelayType as WifiRelayMode) || this.operatingMode || 'disabled';
+    this.operatingMode = mode;
+
+    const uptimeRaw = Number(sysInfo.runTime || sysInfo.wanConnectTime || inet.wanConnectTime || relay.connectDuration || 0);
+    const activeIp = this.routerAddress.replace(/^https?:\/\//, '');
+    const wifiRateNum = devStats.wifiRate ? Number(devStats.wifiRate) : null;
 
     return {
       model: sysInfo.productName || 'Tenda F3',
       hardwareVersion: this.hardwareVersion,
       firmwareVersion: firmware,
       adapterName: this.adapterName,
-      routerIp: sysInfo.lanIP || this.routerAddress.replace(/^https?:\/\//, ''),
-      macAddress: normalizeMac(sysInfo.macAddr || inet.wanMac || 'C8:3A:35:00:00:01'),
+      routerIp: activeIp,
+      lanIp: sysInfo.lanIP || '192.168.0.1',
+      macAddress: normalizeMac(
+        sysInfo.statusWanMAC || wanAdv.macRouter || sysInfo.macAddr || inet.wanMac || 'D8:32:14:00:00:01'
+      ),
+      operatingMode: mode,
+      upstreamSsid: relay.wifiRelaySSID || relay.upperWifiSsid || devStats.routerName || undefined,
+      extenderSsid: relay.extenderSsid || devStats.extendName || undefined,
+      bridgeStatus: relay.wifiRelayConnectStatus || relay.connectState || undefined,
+      signalStrengthDbm: Number.isFinite(wifiRateNum) ? wifiRateNum : null,
+      hasLoginPassword: this.hasLoginPassword,
       uptimeSeconds: Number.isFinite(uptimeRaw) && uptimeRaw > 0 ? uptimeRaw : null,
-      systemTime: sysTime.sysTime || sysInfo.sysTime || null,
+      systemTime: sysTime.sysTimecurrentTime || sysTime.sysTime || sysInfo.sysTime || null,
       online: true,
       capabilities: this.getCapabilities(),
     };
@@ -232,47 +323,114 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
 
   public async getNetworkStatus(): Promise<NetworkStatus> {
     const data = await this.getJsonWithAutoRenew<Record<string, unknown>>(
-      `/goform/getStatus?random=${Math.random()}&modules=internetStatus,wanAdvCfg,systemInfo`
+      `/goform/getStatus?random=${Math.random()}&modules=internetStatus,deviceStatistics,systemInfo,wanAdvCfg,wifiRelay`
     );
 
     const inet = (data.internetStatus || {}) as Record<string, string>;
+    const sysInfo = (data.systemInfo || {}) as Record<string, string>;
     const wanAdv = (data.wanAdvCfg || {}) as Record<string, string>;
+    const relay = (data.wifiRelay || {}) as Record<string, string>;
+    const devStats = ((data.deviceStastics || data.deviceStatistics) || {}) as Record<string, string>;
 
-    // Tenda F3 wanConnectStatus: e.g. '0' disconnected, '1'/'2'/'3' or code string where 3rd digit is status
+    const mode: WifiRelayMode = (relay.wifiRelayType as WifiRelayMode) || 'disabled';
     const rawStatus = String(inet.wanConnectStatus || '');
-    const wanIp = inet.wanIp || '0.0.0.0';
+    const wanIpRaw = sysInfo.statusWanIP || inet.wanIp || '0.0.0.0';
+    const activeRouterHost = this.routerAddress.replace(/^https?:\/\//, '');
+
+    const downKbps = Number(devStats.statusDownSpeed ?? inet.wanDownSpeed ?? 0);
+    const upKbps = Number(devStats.statusUpSpeed ?? inet.wanUpSpeed ?? 0);
+    const wifiRateDbm = devStats.wifiRate ? Number(devStats.wifiRate) : null;
+
+    if (mode === 'client+ap') {
+      const bridged =
+        relay.wifiRelayConnectStatus === 'bridgeSuccess' || relay.connectState === 'bridgeSuccess';
+      const upstreamSsid = relay.wifiRelaySSID || relay.upperWifiSsid || devStats.routerName || 'Upstream Wi-Fi';
+      const subnetPrefix = activeRouterHost.split('.').slice(0, 3).join('.');
+      const derivedGateway = subnetPrefix ? `${subnetPrefix}.1` : '192.168.0.1';
+
+      return {
+        internetConnected: bridged,
+        connectionStatusText: bridged
+          ? `Universal Repeater — Bridged to "${upstreamSsid}"`
+          : relay.wifiRelayConnectStatus === 'pwdError'
+          ? `Universal Repeater — Password Error on "${upstreamSsid}"`
+          : 'Universal Repeater — Disconnected',
+        wanIp: wanIpRaw !== '0.0.0.0' ? wanIpRaw : activeRouterHost,
+        wanSubnetMask:
+          sysInfo.statusWanMask && sysInfo.statusWanMask !== '0.0.0.0'
+            ? sysInfo.statusWanMask
+            : '255.255.255.0',
+        wanGateway:
+          sysInfo.statusWanGaterway && sysInfo.statusWanGaterway !== '0.0.0.0'
+            ? sysInfo.statusWanGaterway
+            : derivedGateway,
+        primaryDns: sysInfo.statusWanDns1 || derivedGateway,
+        secondaryDns: sysInfo.statusWanDns2 || '8.8.8.8',
+        wanMac: normalizeMac(sysInfo.statusWanMAC || wanAdv.macRouter || 'D8:32:14:00:00:01'),
+        connectionType: 'Universal Repeater (Client + AP)',
+        uploadSpeedKbps: upKbps,
+        downloadSpeedKbps: downKbps,
+        operatingMode: mode,
+        upstreamSsid,
+        wifiRateDbm,
+      };
+    }
+
+    if (mode === 'ap') {
+      return {
+        internetConnected: true,
+        connectionStatusText: 'Access Point (AP) Mode Active',
+        wanIp: activeRouterHost,
+        wanSubnetMask: '255.255.255.0',
+        wanGateway: sysInfo.lanIP || '192.168.0.1',
+        primaryDns: sysInfo.lanIP || '192.168.0.1',
+        secondaryDns: '8.8.8.8',
+        wanMac: normalizeMac(sysInfo.statusWanMAC || wanAdv.macRouter || 'D8:32:14:00:00:01'),
+        connectionType: 'Access Point (AP)',
+        uploadSpeedKbps: upKbps,
+        downloadSpeedKbps: downKbps,
+        operatingMode: mode,
+      };
+    }
+
     const isConnected =
-      (wanIp !== '0.0.0.0' && wanIp !== '') ||
+      (wanIpRaw !== '0.0.0.0' && wanIpRaw !== '') ||
       rawStatus === '1' ||
+      rawStatus.slice(2, 3) === '1' ||
       rawStatus.endsWith('103') ||
       rawStatus.endsWith('102') ||
-      /connected/i.test(rawStatus);
+      relay.wifiRelayConnectStatus === 'bridgeSuccess';
 
-    const rawType = String(inet.wanType || '0').toLowerCase();
+    const rawType = String(sysInfo.wanType || inet.wanType || 'dhcp').toLowerCase();
     let connectionType: NetworkStatus['connectionType'] = 'Dynamic IP (DHCP)';
-    if (rawType === '2' || rawType.includes('pppoe')) {
+    if (mode === 'wisp') {
+      connectionType = 'WISP Repeater';
+    } else if (rawType === '2' || rawType.includes('pppoe')) {
       connectionType = 'PPPoE';
     } else if (rawType === '1' || rawType.includes('static')) {
       connectionType = 'Static IP';
-    } else if (rawType.includes('ap') || rawType.includes('bridge')) {
-      connectionType = 'Bridge / AP';
     }
 
-    const dns1 = inet.wanDns1 || ( Array.isArray(inet.dns) ? inet.dns[0] : '' ) || '8.8.8.8';
-    const dns2 = inet.wanDns2 || ( Array.isArray(inet.dns) ? inet.dns[1] : '' ) || '8.8.4.4';
+    const dns1 = sysInfo.statusWanDns1 || inet.wanDns1 || '8.8.8.8';
+    const dns2 = sysInfo.statusWanDns2 || inet.wanDns2 || '8.8.4.4';
 
     return {
       internetConnected: isConnected,
       connectionStatusText: isConnected ? 'Connected to Internet' : 'No Internet Connection',
-      wanIp,
-      wanSubnetMask: inet.wanMask || '255.255.255.0',
-      wanGateway: inet.wanGw || '0.0.0.0',
+      wanIp: wanIpRaw,
+      wanSubnetMask: sysInfo.statusWanMask || inet.wanMask || '255.255.255.0',
+      wanGateway: sysInfo.statusWanGaterway || inet.wanGw || '0.0.0.0',
       primaryDns: String(dns1),
       secondaryDns: String(dns2),
-      wanMac: normalizeMac(wanAdv.macWan || inet.wanMac || 'C8:3A:35:00:00:02'),
+      wanMac: normalizeMac(
+        sysInfo.statusWanMAC || wanAdv.macCurrentWan || wanAdv.macWan || inet.wanMac || 'C8:3A:35:00:00:02'
+      ),
       connectionType,
-      uploadSpeedKbps: Number(inet.wanUpSpeed || 0),
-      downloadSpeedKbps: Number(inet.wanDownSpeed || 0),
+      uploadSpeedKbps: upKbps,
+      downloadSpeedKbps: downKbps,
+      operatingMode: mode,
+      upstreamSsid: relay.wifiRelaySSID || undefined,
+      wifiRateDbm,
     };
   }
 
@@ -285,6 +443,7 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
   public async getConnectedDevices(): Promise<RouterDevice[]> {
     const qos = await this.fetchRawQos();
     const onlineList = Array.isArray(qos.onlineList) ? qos.onlineList : [];
+    const localhostIp = qos.localhost?.localhost || '';
     const nowIso = new Date().toISOString();
 
     return onlineList.map((item, idx) => {
@@ -293,21 +452,22 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
       const upLimit = Number(item.qosListUpLimit ?? 0);
       const accessAllowed = item.qosListAccess !== 'false' && item.qosListAccess !== false;
       const connTypeRaw = String(item.qosListConnectType || 'wifi').toLowerCase();
+      const ip = item.qosListIP || '0.0.0.0';
 
       return {
         id: mac,
         hostname: item.qosListHostname || 'Unknown Device',
         remark: item.qosListRemark || undefined,
-        ipAddress: item.qosListIP || '0.0.0.0',
+        ipAddress: ip,
         macAddress: mac,
         online: true,
         blocked: !accessAllowed,
-        connectionType: connTypeRaw.includes('wired') || connTypeRaw.includes('lan') ? 'Wired' : 'Wireless',
+        isNativeHost: Boolean(localhostIp && ip === localhostIp),
+        connectionType: connTypeRaw.includes('wire') || connTypeRaw.includes('lan') ? 'Wired' : 'Wireless',
         downloadSpeedKbps: Number(item.qosListDownSpeed ?? 0),
         uploadSpeedKbps: Number(item.qosListUpSpeed ?? 0),
-        // Tenda F3 uses 38528 or 0 to represent "Unlimited" in some firmware builds (38528 KB/s ~ 300Mbps)
-        downloadLimitKbps: downLimit >= 38400 || downLimit <= 0 ? 0 : downLimit,
-        uploadLimitKbps: upLimit >= 38400 || upLimit <= 0 ? 0 : upLimit,
+        downloadLimitKbps: downLimit >= 38250 || downLimit <= 0 ? 0 : downLimit,
+        uploadLimitKbps: upLimit >= 38250 || upLimit <= 0 ? 0 : upLimit,
         lastSeen: nowIso,
       };
     });
@@ -339,28 +499,43 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
   }
 
   /**
-   * Submits the complete onlineList and blackList state to /goform/setQos.
-   * Tenda F3 expects:
-   * - onlineList rows: `${hostname}\t${remark}\t${mac}\t${upLimit}\t${downLimit}\t${access}` separated by `\n`
-   * - blackList rows: `${hostname}\t${remark}\t${mac}` separated by `\n`
+   * Submits the complete QoS and MAC filter list to /goform/setQos.
+   * Compatible with both Tenda F3 V12.01.01.52_multi (`qosList` combined format from net-control.js / userManage.js)
+   * and earlier F3 firmware revisions (`onlineList` + `blackList`).
    */
   protected async saveQosLists(
     onlineItems: TendaQosOnlineItem[],
-    blackItems: TendaQosBlackItem[]
+    blackItems: TendaQosBlackItem[],
+    unblockedPermitItems: TendaQosBlackItem[] = []
   ): Promise<boolean> {
-    const onlineSerialized = onlineItems
-      .map((item) => {
-        const host = (item.qosListHostname || 'Unknown').replace(/[\t\r\n]/g, ' ');
-        const remark = (item.qosListRemark || '').replace(/[\t\r\n]/g, ' ');
-        const mac = normalizeMac(item.qosListMac || '');
-        const up = Number(item.qosListUpLimit ?? 0) <= 0 ? 38528 : Number(item.qosListUpLimit);
-        const down = Number(item.qosListDownLimit ?? 0) <= 0 ? 38528 : Number(item.qosListDownLimit);
-        const access = item.qosListAccess === 'false' || item.qosListAccess === false ? 'false' : 'true';
-        return `${host}\t${remark}\t${mac}\t${up}\t${down}\t${access}`;
-      })
-      .join('\n');
+    const attachedRows = onlineItems.map((item) => {
+      const host = (item.qosListHostname || 'Unknown').replace(/[\t\r\n]/g, ' ');
+      const remark = (item.qosListRemark || '').replace(/[\t\r\n]/g, ' ');
+      const mac = normalizeMac(item.qosListMac || '');
+      const access = item.qosListAccess === 'false' || item.qosListAccess === false ? 'false' : 'true';
+      const up = access === 'false' ? 0 : Number(item.qosListUpLimit ?? 0) <= 0 ? 38528 : Number(item.qosListUpLimit);
+      const down =
+        access === 'false' ? 0 : Number(item.qosListDownLimit ?? 0) <= 0 ? 38528 : Number(item.qosListDownLimit);
+      return `${host}\t${remark}\t${mac}\t${up}\t${down}\t${access}`;
+    });
 
-    const blackSerialized = blackItems
+    const permitRows = unblockedPermitItems.map((item) => {
+      const host = (item.qosListHostname || 'UnKnown').replace(/[\t\r\n]/g, ' ');
+      const remark = (item.qosListRemark || '').replace(/[\t\r\n]/g, ' ');
+      const mac = normalizeMac(item.qosListMac || '');
+      return `${host}\t${remark}\t${mac}\t38528\t38528\ttrue`;
+    });
+
+    const forbidRows = blackItems.map((item) => {
+      const host = (item.qosListHostname || 'UnKnown').replace(/[\t\r\n]/g, ' ');
+      const remark = (item.qosListRemark || '').replace(/[\t\r\n]/g, ' ');
+      const mac = normalizeMac(item.qosListMac || '');
+      return `${host}\t${remark}\t${mac}\t0\t0\tfalse`;
+    });
+
+    const combinedQosList = [...attachedRows, ...permitRows, ...forbidRows].join('\n');
+
+    const blackLegacySerialized = blackItems
       .map((item) => {
         const host = (item.qosListHostname || 'Blocked').replace(/[\t\r\n]/g, ' ');
         const remark = (item.qosListRemark || '').replace(/[\t\r\n]/g, ' ');
@@ -371,12 +546,16 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
 
     const res = await this.client.postForm('/goform/setQos', {
       module1: 'qosList',
-      onlineList: onlineSerialized,
-      blackList: blackSerialized,
+      qosList: combinedQosList,
+      onlineList: attachedRows.join('\n'),
+      blackList: blackLegacySerialized,
     });
 
     if (res.statusCode >= 200 && res.statusCode < 400) {
-      logger.info(this.adapterName, `Updated QoS & MAC filter lists (${onlineItems.length} online, ${blackItems.length} blocked)`);
+      logger.info(
+        this.adapterName,
+        `Updated QoS & MAC filter lists (${onlineItems.length} online, ${blackItems.length} blocked)`
+      );
       return true;
     }
     return false;
@@ -388,7 +567,7 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
     const onlineList = Array.isArray(qos.onlineList) ? [...qos.onlineList] : [];
     const blackList = Array.isArray(qos.blackList) ? [...qos.blackList] : [];
 
-    let foundHost = hostname || 'Blocked Device';
+    let foundHost = hostname || 'UnKnown';
     let foundRemark = '';
 
     const remainingOnline: TendaQosOnlineItem[] = [];
@@ -419,14 +598,24 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
     const onlineList = Array.isArray(qos.onlineList) ? [...qos.onlineList] : [];
     const blackList = Array.isArray(qos.blackList) ? [...qos.blackList] : [];
 
-    const filteredBlack = blackList.filter((b) => normalizeMac(b.qosListMac || '') !== targetMac);
+    const unblockedPermit: TendaQosBlackItem[] = [];
+    const filteredBlack: TendaQosBlackItem[] = [];
+
+    for (const b of blackList) {
+      if (normalizeMac(b.qosListMac || '') === targetMac) {
+        unblockedPermit.push(b);
+      } else {
+        filteredBlack.push(b);
+      }
+    }
+
     for (const item of onlineList) {
       if (normalizeMac(item.qosListMac || '') === targetMac) {
         item.qosListAccess = 'true';
       }
     }
 
-    return this.saveQosLists(onlineList, filteredBlack);
+    return this.saveQosLists(onlineList, filteredBlack, unblockedPermit);
   }
 
   public async getBandwidthRules(): Promise<BandwidthRule[]> {
@@ -471,41 +660,56 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
 
   public async getWifiSettings(): Promise<WifiSettings> {
     const data = await this.getJsonWithAutoRenew<Record<string, unknown>>(
-      `/goform/getWifi?random=${Math.random()}&modules=wifiBasicCfg,wifiAdvCfg`
+      `/goform/getWifi?random=${Math.random()}&modules=wifiEn,wifiBasicCfg,wifiAdvCfg,wifiPower`
     );
 
+    const wifiEnObj = (data.wifiEn || {}) as Record<string, string>;
     const basic = (data.wifiBasicCfg || {}) as Record<string, string>;
     const adv = (data.wifiAdvCfg || {}) as Record<string, string>;
+    const power = (data.wifiPower || {}) as Record<string, string>;
 
-    const rawSec = String(basic.wifiSecurityMode || 'WPA/WPA2-PSK').toUpperCase();
+    const rawSec = String(basic.wifiSecurityMode || 'wpa&wpa2').toLowerCase();
     let securityMode: WifiSecurityMode = 'WPA/WPA2-PSK';
-    if (rawSec === 'NONE' || rawSec === 'OPEN') {
+    if (rawSec === 'none' || rawSec === 'open' || basic.wifiNoPwd === 'true') {
       securityMode = 'None';
-    } else if (rawSec === 'WPA-PSK') {
+    } else if (rawSec === 'wpa-psk') {
       securityMode = 'WPA-PSK';
-    } else if (rawSec === 'WPA2-PSK') {
+    } else if (rawSec === 'wpa2-psk') {
       securityMode = 'WPA2-PSK';
     } else {
       securityMode = 'WPA/WPA2-PSK';
     }
 
     return {
-      enabled: basic.wifiEn !== 'false',
+      enabled: wifiEnObj.wifiEn ? wifiEnObj.wifiEn !== 'false' : basic.wifiEn !== 'false',
       ssid: basic.wifiSSID || 'Tenda_F3',
       securityMode,
       password: basic.wifiPwd || '',
       hideSsid: basic.wifiHideSSID === 'true',
-      channel: adv.wifiChannel || 'Auto',
-      bandwidth: adv.wifiBandwidth || '20/40 MHz',
+      channel: adv.wifiChannelCurrent && adv.wifiChannelCurrent !== '0' ? adv.wifiChannelCurrent : adv.wifiChannel || 'Auto',
+      bandwidth: adv.wifiBandwidthCurrent ? `${adv.wifiBandwidthCurrent} MHz` : adv.wifiBandwidth || '20 MHz',
+      transmitPower: power.wifiPower === 'normal' ? 'normal' : 'high',
     };
   }
 
   public async updateWifiSettings(settings: WifiSettings): Promise<boolean> {
+    let firmwareSecMode = 'wpa&wpa2';
+    if (settings.securityMode === 'None') {
+      firmwareSecMode = 'none';
+    } else if (settings.securityMode === 'WPA-PSK') {
+      firmwareSecMode = 'wpa-psk';
+    } else if (settings.securityMode === 'WPA2-PSK') {
+      firmwareSecMode = 'wpa2-psk';
+    } else {
+      firmwareSecMode = 'wpa&wpa2';
+    }
+
     const payload: Record<string, string> = {
-      module1: 'wifiBasicCfg',
+      module1: 'wifiEn',
       wifiEn: settings.enabled ? 'true' : 'false',
+      module2: 'wifiBasicCfg',
       wifiSSID: settings.ssid.trim(),
-      wifiSecurityMode: settings.securityMode === 'None' ? 'NONE' : settings.securityMode,
+      wifiSecurityMode: firmwareSecMode,
       wifiPwd: settings.securityMode === 'None' ? '' : settings.password || '',
       wifiHideSSID: settings.hideSsid ? 'true' : 'false',
     };
@@ -513,6 +717,114 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
     const res = await this.client.postForm('/goform/setWifi', payload);
     if (res.statusCode >= 200 && res.statusCode < 400) {
       logger.info(this.adapterName, `Updated Wi-Fi settings for SSID "${settings.ssid}" (${settings.securityMode})`);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Retrieves the current Wireless Repeating (Universal Repeater / WISP / AP) configuration.
+   */
+  public async getWifiRelayConfig(): Promise<WifiRelayConfig> {
+    const [relayData, statusData] = await Promise.all([
+      this.getJsonWithAutoRenew<Record<string, unknown>>(
+        `/goform/getWifiRelay?random=${Math.random()}&modules=wifiEn,wifiRelay`
+      ),
+      this.getJsonWithAutoRenew<Record<string, unknown>>(
+        `/goform/getStatus?random=${Math.random()}&modules=deviceStatistics,wifiRelay`
+      ).catch(() => ({} as Record<string, unknown>)),
+    ]);
+
+    const wifiEnObj = (relayData.wifiEn || {}) as Record<string, string>;
+    const relay = (relayData.wifiRelay || statusData.wifiRelay || {}) as Record<string, string>;
+    const devStats = ((statusData.deviceStastics || statusData.deviceStatistics) || {}) as Record<string, string>;
+
+    const mode = ((relay.wifiRelayType as WifiRelayMode) || 'disabled');
+    this.operatingMode = mode;
+
+    const signalDbm = devStats.wifiRate ? Number(devStats.wifiRate) : null;
+
+    return {
+      wifiEn: wifiEnObj.wifiEn !== 'false',
+      mode,
+      upstreamSsid: relay.wifiRelaySSID || relay.upperWifiSsid || '',
+      upstreamMac: relay.wifiRelayMAC || '',
+      upstreamChannel: relay.wifiRelayChannel || 'Auto',
+      upstreamSecurityMode: relay.wifiRelaySecurityMode || 'wpa2/AES',
+      upstreamPassword: relay.wifiRelayPwd || '',
+      extenderSsid: relay.extenderSsid || devStats.extendName || '',
+      connectStatus: relay.wifiRelayConnectStatus || relay.connectState || 'disconnect',
+      signalStrengthDbm: Number.isFinite(signalDbm) ? signalDbm : null,
+    };
+  }
+
+  /**
+   * Triggers a live wireless site survey (/goform/getWifiRelay?modules=wifiScan) on the Tenda F3
+   * to list nearby base stations for Universal Repeater / WISP mode.
+   */
+  public async scanWifiNetworks(): Promise<WifiScanNetwork[]> {
+    const data = await this.getJsonWithAutoRenew<Record<string, unknown>>(
+      `/goform/getWifiRelay?random=${Math.random()}&modules=wifiScan`,
+      12000
+    );
+
+    const rawList = Array.isArray(data.wifiScan)
+      ? (data.wifiScan as Array<Record<string, string>>)
+      : [];
+
+    const networks: WifiScanNetwork[] = rawList.map((item) => {
+      let dbm = Number(item.wifiScanSignalStrength || -80);
+      if (dbm > 0) dbm = -dbm;
+      return {
+        ssid: item.wifiScanSSID || '',
+        macAddress: normalizeMac(item.wifiScanMAC || '00:00:00:00:00:00'),
+        channel: String(item.wifiScanChannel || '1'),
+        securityMode: item.wifiScanSecurityMode || 'WPA2/AES',
+        signalStrengthDbm: dbm,
+        signalPercent: dbmToSignalPercent(dbm),
+      };
+    });
+
+    networks.sort((a, b) => b.signalStrengthDbm - a.signalStrengthDbm);
+    return networks;
+  }
+
+  /**
+   * Configures Wireless Repeating mode (`disabled`, `wisp`, `client+ap` Universal Repeater, or `ap`).
+   * Note: Changing the repeating mode causes the Tenda F3 to reboot automatically.
+   */
+  public async setWifiRelayConfig(config: {
+    mode: WifiRelayMode;
+    upstreamSsid?: string;
+    upstreamMac?: string;
+    upstreamChannel?: string;
+    upstreamSecurityMode?: string;
+    upstreamPassword?: string;
+  }): Promise<boolean> {
+    const securityLower =
+      !config.upstreamSecurityMode || config.upstreamSecurityMode.toLowerCase() === 'none'
+        ? 'none'
+        : config.upstreamSecurityMode.toLowerCase();
+
+    const payload: Record<string, string> = {
+      module1: 'wifiRelay',
+      wifiRelayType: config.mode,
+      wifiRelaySSID: config.upstreamSsid || '',
+      wifiRelayMAC: config.upstreamMac || '',
+      wifiRelaySecurityMode: securityLower,
+      wifiRelayChannel: config.upstreamChannel || '1',
+      wifiRelayPwd: securityLower === 'none' ? '' : config.upstreamPassword || '',
+    };
+
+    const res = await this.client.postForm('/goform/setWifiRelay', payload);
+    if (res.statusCode >= 200 && res.statusCode < 400) {
+      this.operatingMode = config.mode;
+      logger.info(
+        this.adapterName,
+        `Applied Wireless Repeating mode "${config.mode}"${
+          config.upstreamSsid ? ` -> upstream SSID "${config.upstreamSsid}"` : ''
+        }`
+      );
       return true;
     }
     return false;
@@ -545,7 +857,6 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
   public async runDiagnostics(): Promise<DiagnosticStepResult[]> {
     const steps: DiagnosticStepResult[] = [];
 
-    // 1. HTTP Reachability
     const t0 = Date.now();
     try {
       const rootRes = await this.client.request('GET', '/');
@@ -567,18 +878,16 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
       return steps;
     }
 
-    // 2. Authentication status
     steps.push({
       id: 'auth-session',
       label: 'Authentication Valid',
       status: this.authenticated ? 'pass' : 'warn',
       detail: this.authenticated
-        ? `Active authenticated session (${this.adapterName}, ${this.capabilities.authMethod})`
+        ? `Active session (${this.adapterName}, Mode: ${this.operatingMode})`
         : 'Not currently logged in',
       durationMs: 1,
     });
 
-    // 3. Status endpoint check
     const tStatus = Date.now();
     try {
       const info = await this.getRouterInfo();
@@ -586,7 +895,7 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
         id: 'status-endpoint',
         label: 'Status Endpoint (/goform/getStatus)',
         status: 'pass',
-        detail: `Model: ${info.model}, Firmware: ${info.firmwareVersion}`,
+        detail: `Model: ${info.model}, Firmware: ${info.firmwareVersion}, Mode: ${info.operatingMode}`,
         durationMs: Date.now() - tStatus,
       });
     } catch (err) {
@@ -599,7 +908,6 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
       });
     }
 
-    // 4. Device / QoS endpoint check
     const tQos = Date.now();
     try {
       const devices = await this.getConnectedDevices();
@@ -620,7 +928,6 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
       });
     }
 
-    // 5. Wi-Fi endpoint check
     const tWifi = Date.now();
     try {
       const wifi = await this.getWifiSettings();
@@ -638,6 +945,26 @@ export abstract class TendaF3BaseAdapter implements RouterAdapter {
         status: 'fail',
         detail: err instanceof Error ? err.message : 'Wi-Fi query failed',
         durationMs: Date.now() - tWifi,
+      });
+    }
+
+    const tRelay = Date.now();
+    try {
+      const relay = await this.getWifiRelayConfig();
+      steps.push({
+        id: 'repeater-endpoint',
+        label: 'Wireless Repeating Endpoint (/goform/getWifiRelay)',
+        status: 'pass',
+        detail: `Mode: ${relay.mode}${relay.upstreamSsid ? `, Base Station: "${relay.upstreamSsid}" (${relay.connectStatus})` : ''}`,
+        durationMs: Date.now() - tRelay,
+      });
+    } catch (err) {
+      steps.push({
+        id: 'repeater-endpoint',
+        label: 'Wireless Repeating Endpoint (/goform/getWifiRelay)',
+        status: 'fail',
+        detail: err instanceof Error ? err.message : 'Wireless Repeating query failed',
+        durationMs: Date.now() - tRelay,
       });
     }
 

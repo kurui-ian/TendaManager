@@ -8,6 +8,7 @@ import {
   LogOut,
   MonitorSmartphone,
   Moon,
+  Radio,
   Router,
   Settings,
   Stethoscope,
@@ -21,6 +22,7 @@ const NAV_ITEMS: Array<{ id: NavPage; label: string; icon: React.ReactNode }> = 
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
   { id: 'devices', label: 'Connected Devices', icon: <MonitorSmartphone size={18} /> },
   { id: 'wifi', label: 'Wi-Fi Settings', icon: <Wifi size={18} /> },
+  { id: 'repeater', label: 'Wireless Repeating', icon: <Radio size={18} /> },
   { id: 'speedtest', label: 'Speed Test', icon: <Gauge size={18} /> },
   { id: 'network', label: 'Network Status', icon: <Globe size={18} /> },
   { id: 'router', label: 'Router Information', icon: <Router size={18} /> },
@@ -35,6 +37,7 @@ export const Sidebar: React.FC = () => {
     setActivePage,
     session,
     devices,
+    wifiRelay,
     logout,
     themeMode,
     toggleThemeMode,
@@ -70,6 +73,11 @@ export const Sidebar: React.FC = () => {
               {item.id === 'devices' && onlineCount > 0 && (
                 <span className="badge badge-info" style={{ padding: '1px 7px', fontSize: '11px' }}>
                   {onlineCount}
+                </span>
+              )}
+              {item.id === 'repeater' && wifiRelay && wifiRelay.mode !== 'disabled' && (
+                <span className="badge badge-success" style={{ padding: '1px 6px', fontSize: '10px' }}>
+                  {wifiRelay.mode === 'client+ap' ? 'Repeater' : wifiRelay.mode.toUpperCase()}
                 </span>
               )}
             </button>

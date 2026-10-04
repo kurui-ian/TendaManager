@@ -23,9 +23,9 @@ interface SimBlackDevice {
 }
 
 /**
- * Local Tenda F3 HTTP Firmware Simulator (V12.01.01.48_en eCos httpd protocol).
- * Used by automated integration tests and optional local evaluation mode when
- * the host machine is not physically connected to a Tenda F3 network.
+ * Local Tenda F3 HTTP Firmware Simulator (V12.01.01.48_en / V12.01.01.52_multi eCos httpd protocol).
+ * Supports /goform/getStatus, /goform/getHomePageInfo, /goform/getQos, /goform/setQos,
+ * /goform/getWifi, /goform/setWifi, /goform/getWifiRelay (including wifiScan), and /goform/setWifiRelay.
  */
 export class TendaF3SimulatorServer {
   private server: http.Server | null = null;
@@ -37,11 +37,26 @@ export class TendaF3SimulatorServer {
   private wifiState = {
     wifiEn: 'true',
     wifiSSID: 'Tenda_F3_Home',
-    wifiSecurityMode: 'WPA/WPA2-PSK',
+    wifiSecurityMode: 'wpa&wpa2',
     wifiPwd: 'TendaWifi2026',
     wifiHideSSID: 'false',
     wifiChannel: '6',
-    wifiBandwidth: '20/40 MHz',
+    wifiBandwidth: '20',
+  };
+
+  private relayState = {
+    wifiRelayType: 'client+ap',
+    wifiRelaySSID: 'Fiber_Upstream_WiFi',
+    upperWifiSsid: 'Fiber_Upstream_WiFi',
+    extenderSsid: 'Tenda_F3_Home',
+    extenderPwd: 'TendaWifi2026',
+    wifiRelayMAC: '78:17:BE:1A:07:17',
+    wifiRelayChannel: '6',
+    wifiRelaySecurityMode: 'wpa2/AES',
+    wifiRelayPwd: 'UpstreamSecret123',
+    wifiRelayConnectStatus: 'bridgeSuccess',
+    connectState: 'bridgeSuccess',
+    connectDuration: '14620',
   };
 
   private onlineDevices: SimDevice[] = [
@@ -210,6 +225,20 @@ export class TendaF3SimulatorServer {
       return;
     }
 
+    if (pathname === '/goform/getHomePageInfo') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(
+        JSON.stringify({
+          loginAuth: {
+            hasLoginPwd: this.adminPassword ? 'true' : 'false',
+            'username ': 'admin',
+          },
+          wifiRelay: this.relayState,
+        })
+      );
+      return;
+    }
+
     if (pathname === '/login/Auth' && req.method === 'POST') {
       const body = await this.readBody(req);
       const form = this.parseForm(body);
@@ -240,7 +269,6 @@ export class TendaF3SimulatorServer {
       return;
     }
 
-    // All /goform/* endpoints below require valid authentication
     if (!this.isAuthorized(req)) {
       res.writeHead(302, { Location: '/login.html' });
       res.end('<html><body>Redirecting to /login.html</body></html>');
@@ -255,11 +283,19 @@ export class TendaF3SimulatorServer {
           softVersion: 'V12.01.01.48_en',
           lanIP: '192.168.0.1',
           macAddr: 'C8:3A:35:4F:8A:10',
+          statusWanMAC: 'C8:3A:35:4F:8A:11',
+          statusWanIP: '105.163.42.198',
+          statusWanMask: '255.255.252.0',
+          statusWanGaterway: '105.163.40.1',
+          statusWanDns1: '8.8.8.8',
+          statusWanDns2: '1.1.1.1',
+          wanType: 'dhcp',
           runTime: String(uptimeSeconds),
+          wanConnectTime: String(uptimeSeconds),
           sysTime: new Date().toISOString().replace('T', ' ').slice(0, 19),
         },
         internetStatus: {
-          wanConnectStatus: '0103',
+          wanConnectStatus: '0113',
           wanIp: '105.163.42.198',
           wanMask: '255.255.252.0',
           wanGw: '105.163.40.1',
@@ -273,11 +309,18 @@ export class TendaF3SimulatorServer {
         },
         wanAdvCfg: {
           macWan: 'C8:3A:35:4F:8A:11',
+          macRouter: 'C8:3A:35:4F:8A:10',
         },
-        deviceStatistics: {
+        deviceStastics: {
           statusBlackNum: String(this.blackDevices.length),
           statusOnlineNumber: String(this.onlineDevices.length),
+          statusUpSpeed: '96',
+          statusDownSpeed: '1865',
+          wifiRate: '-52',
+          routerName: this.relayState.wifiRelaySSID,
+          extendName: this.wifiState.wifiSSID,
         },
+        wifiRelay: this.relayState,
       };
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(payload));
@@ -292,6 +335,10 @@ export class TendaF3SimulatorServer {
         },
         onlineList: this.onlineDevices,
         blackList: this.blackDevices,
+        macFilter: {
+          curFilterMode: 'deny',
+          macFilterList: [],
+        },
       };
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(payload));
@@ -312,44 +359,41 @@ export class TendaF3SimulatorServer {
         });
       }
 
-      const newOnline: SimDevice[] = [];
-      const onlineRows = (form.onlineList || '').split('\n').filter((r) => r.trim().length > 0);
-      onlineRows.forEach((row, idx) => {
-        const cols = row.split('\t');
-        if (cols.length >= 6) {
-          const [host, remark, mac, upLimit, downLimit, access] = cols;
-          const prev = existingIpByMac.get(mac.toUpperCase());
-          newOnline.push({
-            qosListHostname: host || 'Device',
-            qosListRemark: remark || '',
-            qosListIP: prev?.ip || `192.168.0.${115 + idx}`,
-            qosListConnectType: prev?.type || 'wifi',
-            qosListMac: mac.toUpperCase(),
-            qosListDownSpeed: prev?.down || '45',
-            qosListUpSpeed: prev?.up || '10',
-            qosListUpLimit: upLimit || '38528',
-            qosListDownLimit: downLimit || '38528',
-            qosListAccess: access === 'false' ? 'false' : 'true',
-          });
-        }
-      });
-
-      const newBlack: SimBlackDevice[] = [];
-      const blackRows = (form.blackList || '').split('\n').filter((r) => r.trim().length > 0);
-      for (const row of blackRows) {
-        const cols = row.split('\t');
-        if (cols.length >= 3) {
-          const [host, remark, mac] = cols;
-          newBlack.push({
-            qosListHostname: host || 'Blocked Device',
-            qosListRemark: remark || '',
-            qosListMac: mac.toUpperCase(),
-          });
-        }
+      if (form.qosList !== undefined) {
+        const newOnline: SimDevice[] = [];
+        const newBlack: SimBlackDevice[] = [];
+        const rows = form.qosList.split('\n').filter((r) => r.trim().length > 0);
+        rows.forEach((row, idx) => {
+          const cols = row.split('\t');
+          if (cols.length >= 6) {
+            const [host, remark, mac, upLimit, downLimit, access] = cols;
+            const upperMac = mac.toUpperCase();
+            if (access === 'false') {
+              newBlack.push({
+                qosListHostname: host || 'Blocked Device',
+                qosListRemark: remark || '',
+                qosListMac: upperMac,
+              });
+            } else {
+              const prev = existingIpByMac.get(upperMac);
+              newOnline.push({
+                qosListHostname: host || 'Device',
+                qosListRemark: remark || '',
+                qosListIP: prev?.ip || `192.168.0.${115 + idx}`,
+                qosListConnectType: prev?.type || 'wifi',
+                qosListMac: upperMac,
+                qosListDownSpeed: prev?.down || '45',
+                qosListUpSpeed: prev?.up || '10',
+                qosListUpLimit: upLimit || '38528',
+                qosListDownLimit: downLimit || '38528',
+                qosListAccess: 'true',
+              });
+            }
+          }
+        });
+        this.onlineDevices = newOnline;
+        this.blackDevices = newBlack;
       }
-
-      this.onlineDevices = newOnline;
-      this.blackDevices = newBlack;
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ errCode: '0' }));
@@ -358,6 +402,7 @@ export class TendaF3SimulatorServer {
 
     if (pathname === '/goform/getWifi') {
       const payload = {
+        wifiEn: { wifiEn: this.wifiState.wifiEn },
         wifiBasicCfg: {
           wifiEn: this.wifiState.wifiEn,
           wifiSSID: this.wifiState.wifiSSID,
@@ -367,7 +412,13 @@ export class TendaF3SimulatorServer {
         },
         wifiAdvCfg: {
           wifiChannel: this.wifiState.wifiChannel,
+          wifiChannelCurrent: this.wifiState.wifiChannel,
           wifiBandwidth: this.wifiState.wifiBandwidth,
+          wifiBandwidthCurrent: this.wifiState.wifiBandwidth,
+        },
+        wifiPower: {
+          wifiPower: 'high',
+          wifiPowerGear: 'hide_power',
         },
       };
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -389,10 +440,85 @@ export class TendaF3SimulatorServer {
       return;
     }
 
+    if (pathname === '/goform/getWifiRelay') {
+      const modules = reqUrl.searchParams.get('modules') || '';
+      if (modules.includes('wifiScan')) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(
+          JSON.stringify({
+            wifiScan: [
+              {
+                wifiScanSSID: 'Fiber_Upstream_WiFi',
+                wifiScanMAC: '78:17:BE:1A:07:17',
+                wifiScanChannel: '6',
+                wifiScanSecurityMode: 'WPA2/AES',
+                wifiScanSignalStrength: '-52',
+              },
+              {
+                wifiScanSSID: 'Office_Main_Router',
+                wifiScanMAC: 'B4:0F:3B:36:FF:80',
+                wifiScanChannel: '11',
+                wifiScanSecurityMode: 'WPAWPA2/AES',
+                wifiScanSignalStrength: '-64',
+              },
+              {
+                wifiScanSSID: 'Neighbor_Guest_WiFi',
+                wifiScanMAC: 'CC:2D:21:1E:1D:28',
+                wifiScanChannel: '1',
+                wifiScanSecurityMode: 'NONE',
+                wifiScanSignalStrength: '-78',
+              },
+            ],
+          })
+        );
+        return;
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(
+        JSON.stringify({
+          wifiEn: { wifiEn: this.wifiState.wifiEn },
+          wifiRelay: this.relayState,
+        })
+      );
+      return;
+    }
+
+    if (pathname === '/goform/setWifiRelay' && req.method === 'POST') {
+      const body = await this.readBody(req);
+      const form = this.parseForm(body);
+      if (form.wifiRelayType !== undefined) {
+        this.relayState.wifiRelayType = form.wifiRelayType;
+      }
+      if (form.wifiRelaySSID !== undefined) {
+        this.relayState.wifiRelaySSID = form.wifiRelaySSID;
+        this.relayState.upperWifiSsid = form.wifiRelaySSID;
+      }
+      if (form.wifiRelayMAC !== undefined) {
+        this.relayState.wifiRelayMAC = form.wifiRelayMAC;
+      }
+      if (form.wifiRelayChannel !== undefined) {
+        this.relayState.wifiRelayChannel = form.wifiRelayChannel;
+      }
+      if (form.wifiRelaySecurityMode !== undefined) {
+        this.relayState.wifiRelaySecurityMode = form.wifiRelaySecurityMode;
+      }
+      if (form.wifiRelayPwd !== undefined) {
+        this.relayState.wifiRelayPwd = form.wifiRelayPwd;
+      }
+      this.relayState.wifiRelayConnectStatus =
+        this.relayState.wifiRelayType === 'disabled' ? 'disconnect' : 'bridgeSuccess';
+      this.relayState.connectState = this.relayState.wifiRelayConnectStatus;
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ errCode: '0' }));
+      return;
+    }
+
     if (pathname === '/goform/sysReboot' || pathname === '/goform/SysToolReboot') {
       this.startTime = Date.now();
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ errCode: '0' }));
+      res.end(JSON.stringify({ errCode: '100' }));
       return;
     }
 

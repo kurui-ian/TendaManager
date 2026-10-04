@@ -15,6 +15,8 @@ export interface LogEntry {
 const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /(password["'\s:=]+)([^"'\s&,;}]+)/gi, replacement: '$1[REDACTED]' },
   { pattern: /(wifiPwd["'\s:=]+)([^"'\s&,;}]+)/gi, replacement: '$1[REDACTED]' },
+  { pattern: /(wifiRelayPwd["'\s:=]+)([^"'\s&,;}]+)/gi, replacement: '$1[REDACTED]' },
+  { pattern: /(extenderPwd["'\s:=]+)([^"'\s&,;}]+)/gi, replacement: '$1[REDACTED]' },
   { pattern: /(ecos_pw=)([^;\s"']+)/gi, replacement: '$1[REDACTED]' },
   { pattern: /(Set-Cookie["'\s:=]+)([^"\r\n]+)/gi, replacement: '$1[REDACTED_COOKIE]' },
   { pattern: /(Cookie["'\s:=]+)([^"\r\n]+)/gi, replacement: '$1[REDACTED_COOKIE]' },

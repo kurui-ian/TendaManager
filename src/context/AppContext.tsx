@@ -8,6 +8,7 @@ import {
   NetworkStatus,
   RouterDevice,
   RouterInfo,
+  WifiRelayConfig,
   WifiSettings,
 } from '../types/ipc';
 
@@ -26,6 +27,7 @@ interface AppContextValue {
   networkStatus: NetworkStatus | null;
   devices: RouterDevice[];
   wifiSettings: WifiSettings | null;
+  wifiRelay: WifiRelayConfig | null;
   settings: AppSettings | null;
   activePage: NavPage;
   setActivePage: (page: NavPage) => void;
@@ -56,6 +58,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [networkStatus, setNetworkStatus] = useState<NetworkStatus | null>(null);
   const [devices, setDevices] = useState<RouterDevice[]>([]);
   const [wifiSettings, setWifiSettings] = useState<WifiSettings | null>(null);
+  const [wifiRelay, setWifiRelay] = useState<WifiRelayConfig | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [activePage, setActivePage] = useState<NavPage>('dashboard');
   const [connectionLost, setConnectionLost] = useState<boolean>(false);
@@ -90,16 +93,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!window.tendaApi) return;
     setRefreshing(true);
     try {
-      const [info, net, devList, wifi] = await Promise.all([
+      const [info, net, devList, wifi, relay] = await Promise.all([
         window.tendaApi.getRouterInfo(),
         window.tendaApi.getNetworkStatus(),
         window.tendaApi.getDevices(),
         window.tendaApi.getWifiSettings(),
+        window.tendaApi.getWifiRelayConfig().catch(() => null),
       ]);
       setRouterInfo(info);
       setNetworkStatus(net);
       setDevices(devList);
       setWifiSettings(wifi);
+      if (relay) {
+        setWifiRelay(relay);
+      }
       if (connectionLost) {
         setConnectionLost(false);
         addToast('success', 'Router Reconnected', `Connected to ${info.routerIp}`);
@@ -146,6 +153,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setRouterInfo(null);
           setNetworkStatus(null);
           setDevices([]);
+          setWifiRelay(null);
         } else {
           addToast(
             'info',
@@ -195,6 +203,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setNetworkStatus(null);
       setDevices([]);
       setWifiSettings(null);
+      setWifiRelay(null);
       setConnectionLost(false);
       addToast('info', 'Logged Out', 'Router session closed.');
     },
@@ -214,7 +223,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       addToast('info', 'Restarting Router', 'Waiting for Tenda F3 to reboot and come back online...');
       // Wait and poll until router responds again
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < 15; i++) {
         await new Promise((r) => setTimeout(r, 2000));
         try {
           await refreshAllData();
@@ -328,6 +337,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         networkStatus,
         devices,
         wifiSettings,
+        wifiRelay,
         settings,
         activePage,
         setActivePage,

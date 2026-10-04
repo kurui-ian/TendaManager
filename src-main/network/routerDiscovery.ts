@@ -1,4 +1,4 @@
-import { DiscoveryResult, F3HardwareVersion } from '../router/types';
+import { DiscoveryResult, F3HardwareVersion, WifiRelayMode } from '../router/types';
 import { TendaHttpClient } from '../router/httpClient';
 import { networkInspector } from './networkInspector';
 import { logger } from '../logger/logger';
@@ -12,13 +12,16 @@ export interface ProbeOutcome {
   firmware: string | null;
   hardwareVersion: F3HardwareVersion | null;
   requiresUsername: boolean;
+  hasLoginPassword: boolean;
+  operatingMode: WifiRelayMode | null;
+  upstreamSsid: string | null;
+  extenderSsid: string | null;
   nonTendaVendorHint: string | null;
 }
 
 /**
- * Discovers the local router gateway, probes HTTP/HTTPS management endpoints,
- * identifies Tenda F3 firmware variants (v2.0, v3.0, v4.0, v5.0), and detects
- * non-Tenda gateways gracefully without fabricating router responses.
+ * Discovers the local Tenda F3 router in both standard Router/WISP mode (at the Default Gateway / 192.168.0.1)
+ * and Universal Repeater (`client+ap`) / AP mode (where the Tenda F3 resides on an ARP neighbor IP on the upstream subnet).
  */
 export class RouterDiscovery {
   public async discover(
@@ -43,6 +46,10 @@ export class RouterDiscovery {
         detectedHardwareVersion: simProbe.hardwareVersion || 'F3 v3.0',
         recommendedAdapter: this.mapHardwareToAdapterName(simProbe.hardwareVersion || 'F3 v3.0'),
         requiresUsername: simProbe.requiresUsername,
+        hasLoginPassword: simProbe.hasLoginPassword,
+        operatingMode: simProbe.operatingMode || 'disabled',
+        upstreamSsid: simProbe.upstreamSsid,
+        extenderSsid: simProbe.extenderSsid,
         nonTendaVendorHint: null,
         simulatorActive: true,
         simulatorUrl: simulatorInfo.url,
@@ -53,11 +60,25 @@ export class RouterDiscovery {
     if (customAddress && customAddress.trim()) {
       candidatesSet.add(customAddress.trim());
     }
+
+    // Inspect ARP table for Tenda OUI devices (e.g. Tenda F3 in Universal Repeater mode on 192.168.100.8)
+    const arpNeighbors = await networkInspector.getArpNeighbors(netInterface?.localIp);
+    for (const neighbor of arpNeighbors) {
+      if (neighbor.isTendaOui) {
+        candidatesSet.add(neighbor.ip);
+      }
+    }
+
     if (netInterface?.defaultGateway) {
       candidatesSet.add(netInterface.defaultGateway);
     }
     candidatesSet.add('192.168.0.1');
     candidatesSet.add('tendawifi.com');
+
+    // Add remaining ARP neighbors in case the Tenda router uses a custom/cloned MAC
+    for (const neighbor of arpNeighbors) {
+      candidatesSet.add(neighbor.ip);
+    }
 
     const candidateAddresses = Array.from(candidatesSet);
     logger.info('RouterDiscovery', `Starting router discovery across candidates: ${candidateAddresses.join(', ')}`);
@@ -92,6 +113,10 @@ export class RouterDiscovery {
         detectedHardwareVersion: null,
         recommendedAdapter: null,
         requiresUsername: false,
+        hasLoginPassword: true,
+        operatingMode: null,
+        upstreamSsid: null,
+        extenderSsid: null,
         nonTendaVendorHint: null,
         simulatorActive: false,
       };
@@ -112,13 +137,17 @@ export class RouterDiscovery {
       detectedHardwareVersion: hwVer,
       recommendedAdapter: hwVer ? this.mapHardwareToAdapterName(hwVer) : null,
       requiresUsername: bestOutcome.requiresUsername,
+      hasLoginPassword: bestOutcome.hasLoginPassword,
+      operatingMode: bestOutcome.operatingMode,
+      upstreamSsid: bestOutcome.upstreamSsid,
+      extenderSsid: bestOutcome.extenderSsid,
       nonTendaVendorHint: bestOutcome.nonTendaVendorHint,
       simulatorActive: false,
     };
   }
 
   public async probeAddress(address: string): Promise<ProbeOutcome> {
-    const client = new TendaHttpClient({ timeoutMs: 2800, maxRetries: 0 });
+    const client = new TendaHttpClient({ timeoutMs: 2400, maxRetries: 0 });
     client.setBaseUrl(address);
 
     let httpAvailable = false;
@@ -127,17 +156,17 @@ export class RouterDiscovery {
     let headersCombined = '';
 
     try {
-      const rootRes = await client.request('GET', '/', undefined, 2500);
+      const rootRes = await client.request('GET', '/', undefined, 2200);
       httpAvailable = true;
       rootHtml = rootRes.body;
       headersCombined = JSON.stringify(rootRes.headers);
 
-      // Follow redirect to login.html if root is a redirect
       if (rootRes.redirectLocation || rootHtml.length < 150) {
         try {
-          const loginRes = await client.request('GET', '/login.html', undefined, 2200);
-          if (loginRes.statusCode === 200) {
-            rootHtml += '\n' + loginRes.body;
+          const targetPage = rootRes.redirectLocation?.includes('index.html') ? '/index.html' : '/login.html';
+          const secondRes = await client.request('GET', targetPage, undefined, 2000);
+          if (secondRes.statusCode === 200) {
+            rootHtml += '\n' + secondRes.body;
           }
         } catch {
           // Ignore secondary probe failure
@@ -149,9 +178,9 @@ export class RouterDiscovery {
 
     if (!httpAvailable && !address.startsWith('http://')) {
       try {
-        const httpsClient = new TendaHttpClient({ timeoutMs: 2500, maxRetries: 0 });
+        const httpsClient = new TendaHttpClient({ timeoutMs: 2200, maxRetries: 0 });
         httpsClient.setBaseUrl(`https://${address.replace(/^https?:\/\//, '')}`);
-        const httpsRes = await httpsClient.request('GET', '/', undefined, 2500);
+        const httpsRes = await httpsClient.request('GET', '/', undefined, 2200);
         httpsAvailable = true;
         rootHtml = httpsRes.body;
         headersCombined = JSON.stringify(httpsRes.headers);
@@ -170,34 +199,40 @@ export class RouterDiscovery {
         firmware: null,
         hardwareVersion: null,
         requiresUsername: false,
+        hasLoginPassword: true,
+        operatingMode: null,
+        upstreamSsid: null,
+        extenderSsid: null,
         nonTendaVendorHint: null,
       };
     }
 
-    // Check for Tenda signatures in HTML, headers, or macro_config / getStatus
     const isTendaInHtml =
       /tenda/i.test(rootHtml) ||
       /ecos_pw/i.test(headersCombined) ||
       /goform\/getStatus/i.test(rootHtml) ||
-      /reasy-ui/i.test(rootHtml) ||
+      /reasyui|reasy-ui/i.test(rootHtml) ||
       /bLanguage/i.test(headersCombined);
 
     let macroText = '';
     let statusJson: Record<string, unknown> | null = null;
+    let homePageJson: Record<string, unknown> | null = null;
 
     if (httpAvailable) {
       try {
-        const macroRes = await client.request('GET', '/common/macro_config.js', undefined, 2000);
-        if (macroRes.statusCode === 200 && /CONFIG_/i.test(macroRes.body)) {
-          macroText = macroRes.body;
+        const homeRes = await client.getJson<Record<string, unknown>>(
+          `/goform/getHomePageInfo?random=${Math.random()}&modules=loginAuth,wifiRelay`
+        );
+        if (homeRes.data) {
+          homePageJson = homeRes.data;
         }
       } catch {
-        // Not all versions expose macro_config.js unauthenticated
+        // Ignore
       }
 
       try {
         const statusRes = await client.getJson<Record<string, unknown>>(
-          `/goform/getStatus?random=${Math.random()}&modules=systemInfo,internetStatus`
+          `/goform/getStatus?random=${Math.random()}&modules=systemInfo,internetStatus,wifiRelay,deviceStatistics`
         );
         if (statusRes.data) {
           statusJson = statusRes.data;
@@ -205,9 +240,22 @@ export class RouterDiscovery {
       } catch {
         // Ignore
       }
+
+      try {
+        const macroRes = await client.request('GET', '/common/macro_config.js', undefined, 1600);
+        if (macroRes.statusCode === 200 && /CONFIG_/i.test(macroRes.body)) {
+          macroText = macroRes.body;
+        }
+      } catch {
+        // Ignore
+      }
     }
 
-    const isTenda = isTendaInHtml || Boolean(macroText) || Boolean(statusJson?.systemInfo);
+    const isTenda =
+      isTendaInHtml ||
+      Boolean(macroText) ||
+      Boolean(statusJson?.systemInfo) ||
+      Boolean(homePageJson?.wifiRelay);
 
     if (!isTenda) {
       const nonTendaVendorHint = this.detectOtherVendor(rootHtml, headersCombined);
@@ -220,12 +268,18 @@ export class RouterDiscovery {
         firmware: null,
         hardwareVersion: null,
         requiresUsername: false,
+        hasLoginPassword: true,
+        operatingMode: null,
+        upstreamSsid: null,
+        extenderSsid: null,
         nonTendaVendorHint,
       };
     }
 
-    // Extract firmware and hardware version if exposed
     const sysInfo = (statusJson?.systemInfo || {}) as Record<string, string>;
+    const relayInfo = ((statusJson?.wifiRelay || homePageJson?.wifiRelay) || {}) as Record<string, string>;
+    const loginAuth = (homePageJson?.loginAuth || {}) as Record<string, string>;
+
     let firmware = sysInfo.softVersion || null;
     if (!firmware && macroText) {
       const fwMatch = macroText.match(/CONFIG_FIRMWARE_VERSION\s*=\s*["']([^"']+)["']/i);
@@ -237,7 +291,12 @@ export class RouterDiscovery {
     }
 
     const hardwareVersion = this.inferF3HardwareVersion(firmware, macroText, rootHtml);
-    const requiresUsername = /id=["']username["']/i.test(rootHtml) && !/type=["']hidden["'][^>]*id=["']username["']/i.test(rootHtml);
+    const requiresUsername =
+      /id=["']username["']/i.test(rootHtml) && !/type=["']hidden["'][^>]*id=["']username["']/i.test(rootHtml);
+    const hasLoginPassword = loginAuth.hasLoginPwd ? loginAuth.hasLoginPwd === 'true' : true;
+    const operatingMode = (relayInfo.wifiRelayType as WifiRelayMode) || null;
+    const upstreamSsid = relayInfo.wifiRelaySSID || relayInfo.upperWifiSsid || null;
+    const extenderSsid = relayInfo.extenderSsid || null;
 
     return {
       address,
@@ -245,9 +304,13 @@ export class RouterDiscovery {
       httpsAvailable,
       isTenda: true,
       model: 'Tenda F3',
-      firmware: firmware || 'V12.01.01.xx (Detected on Login)',
+      firmware: firmware || 'V12.01.01.xx',
       hardwareVersion,
       requiresUsername,
+      hasLoginPassword,
+      operatingMode,
+      upstreamSsid,
+      extenderSsid,
       nonTendaVendorHint: null,
     };
   }

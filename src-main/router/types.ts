@@ -1,11 +1,36 @@
 export type F3HardwareVersion = 'F3 v2.0' | 'F3 v3.0' | 'F3 v4.0' | 'F3 v5.0' | 'Tenda F3 (Generic)';
 
+export type WifiRelayMode = 'disabled' | 'wisp' | 'client+ap' | 'ap';
+
+export interface WifiRelayConfig {
+  wifiEn: boolean;
+  mode: WifiRelayMode;
+  upstreamSsid: string;
+  upstreamMac: string;
+  upstreamChannel: string;
+  upstreamSecurityMode: string;
+  upstreamPassword?: string;
+  extenderSsid?: string;
+  connectStatus: 'bridgeSuccess' | 'disconnect' | 'pwdError' | string;
+  signalStrengthDbm?: number | null;
+}
+
+export interface WifiScanNetwork {
+  ssid: string;
+  macAddress: string;
+  channel: string;
+  securityMode: string;
+  signalStrengthDbm: number;
+  signalPercent: number;
+}
+
 export interface RouterCapabilities {
   canViewDevices: boolean;
   canBlockDevices: boolean;
   canControlBandwidth: boolean;
   canChangeWifi: boolean;
   canHideSsid: boolean;
+  canWirelessRepeat: boolean;
   canReboot: boolean;
   canViewWanStatus: boolean;
   canViewUptime: boolean;
@@ -19,7 +44,14 @@ export interface RouterInfo {
   firmwareVersion: string;
   adapterName: string;
   routerIp: string;
+  lanIp: string;
   macAddress: string;
+  operatingMode: WifiRelayMode;
+  upstreamSsid?: string;
+  extenderSsid?: string;
+  bridgeStatus?: string;
+  signalStrengthDbm?: number | null;
+  hasLoginPassword?: boolean;
   uptimeSeconds: number | null;
   systemTime: string | null;
   online: boolean;
@@ -35,33 +67,44 @@ export interface NetworkStatus {
   primaryDns: string;
   secondaryDns: string;
   wanMac: string;
-  connectionType: 'Dynamic IP (DHCP)' | 'PPPoE' | 'Static IP' | 'Bridge / AP' | 'Unknown';
+  connectionType:
+    | 'Dynamic IP (DHCP)'
+    | 'PPPoE'
+    | 'Static IP'
+    | 'Universal Repeater (Client + AP)'
+    | 'WISP Repeater'
+    | 'Access Point (AP)'
+    | 'Unknown';
   uploadSpeedKbps: number;
   downloadSpeedKbps: number;
+  operatingMode?: WifiRelayMode;
+  upstreamSsid?: string;
+  wifiRateDbm?: number | null;
 }
 
 export interface RouterDevice {
-  id: string; // Normalized MAC address or IP fallback
-  hostname: string; // Router-reported hostname
-  customName?: string; // User-assigned friendly name stored locally
-  remark?: string; // Router-stored remark if present
+  id: string;
+  hostname: string;
+  customName?: string;
+  remark?: string;
   ipAddress: string;
   macAddress: string;
   online: boolean;
   blocked: boolean;
+  isNativeHost?: boolean;
   connectionType: 'Wireless' | 'Wired' | 'Unknown';
   downloadSpeedKbps: number;
   uploadSpeedKbps: number;
-  downloadLimitKbps: number; // 0 means Unlimited
-  uploadLimitKbps: number;   // 0 means Unlimited
+  downloadLimitKbps: number;
+  uploadLimitKbps: number;
   lastSeen: string;
 }
 
 export interface BandwidthRule {
   macAddress: string;
   hostname: string;
-  downloadLimitKbps: number; // 0 = Unlimited
-  uploadLimitKbps: number;   // 0 = Unlimited
+  downloadLimitKbps: number;
+  uploadLimitKbps: number;
 }
 
 export type WifiSecurityMode =
@@ -78,6 +121,7 @@ export interface WifiSettings {
   hideSsid: boolean;
   channel?: string | number;
   bandwidth?: string;
+  transmitPower?: 'high' | 'normal';
 }
 
 export interface NetworkInterfaceInfo {
@@ -104,6 +148,10 @@ export interface DiscoveryResult {
   detectedHardwareVersion: F3HardwareVersion | null;
   recommendedAdapter: string | null;
   requiresUsername: boolean;
+  hasLoginPassword: boolean;
+  operatingMode: WifiRelayMode | null;
+  upstreamSsid: string | null;
+  extenderSsid: string | null;
   nonTendaVendorHint: string | null;
   simulatorActive: boolean;
   simulatorUrl?: string;
@@ -115,8 +163,10 @@ export interface AuthSession {
   adapterName: string;
   hardwareVersion: F3HardwareVersion;
   firmwareVersion: string;
+  operatingMode: WifiRelayMode;
+  hasLoginPassword: boolean;
   loggedInAt: string;
-  sessionCookiePreview: string; // Masked preview for diagnostics only
+  sessionCookiePreview: string;
   isSimulator: boolean;
 }
 
@@ -194,6 +244,16 @@ export interface RouterAdapter {
   getConnectedDevices(): Promise<RouterDevice[]>;
   getWifiSettings(): Promise<WifiSettings>;
   updateWifiSettings(settings: WifiSettings): Promise<boolean>;
+  getWifiRelayConfig(): Promise<WifiRelayConfig>;
+  scanWifiNetworks(): Promise<WifiScanNetwork[]>;
+  setWifiRelayConfig(config: {
+    mode: WifiRelayMode;
+    upstreamSsid?: string;
+    upstreamMac?: string;
+    upstreamChannel?: string;
+    upstreamSecurityMode?: string;
+    upstreamPassword?: string;
+  }): Promise<boolean>;
   getBlockedDevices(): Promise<RouterDevice[]>;
   blockDevice(macAddress: string, hostname?: string): Promise<boolean>;
   unblockDevice(macAddress: string): Promise<boolean>;

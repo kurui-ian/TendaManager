@@ -38,6 +38,7 @@ export const RouterInfoPage: React.FC = () => {
     { label: 'Per-Device Upload/Download Bandwidth Control', supported: caps?.canControlBandwidth ?? true },
     { label: 'Wi-Fi SSID & WPA/WPA2 Configuration (/goform/setWifi)', supported: caps?.canChangeWifi ?? true },
     { label: 'Hide Wi-Fi SSID Broadcast', supported: caps?.canHideSsid ?? true },
+    { label: 'Wireless Repeating: Universal Repeater / WISP / AP (/goform/setWifiRelay)', supported: caps?.canWirelessRepeating ?? true },
     { label: 'WAN & Internet Status Inspection (/goform/getStatus)', supported: caps?.canViewWanStatus ?? true },
     { label: 'Remote System Reboot (/goform/sysReboot)', supported: caps?.canReboot ?? true },
   ];

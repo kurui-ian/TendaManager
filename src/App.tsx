@@ -7,6 +7,7 @@ import { OnboardingLogin } from './pages/OnboardingLogin';
 import { DashboardPage } from './pages/DashboardPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { WifiPage } from './pages/WifiPage';
+import { RepeaterPage } from './pages/RepeaterPage';
 import { SpeedTestPage } from './pages/SpeedTestPage';
 import { NetworkStatusPage } from './pages/NetworkStatusPage';
 import { RouterInfoPage } from './pages/RouterInfoPage';
@@ -34,6 +35,7 @@ const MainShell: React.FC = () => {
         {activePage === 'dashboard' && <DashboardPage />}
         {activePage === 'devices' && <DevicesPage />}
         {activePage === 'wifi' && <WifiPage />}
+        {activePage === 'repeater' && <RepeaterPage />}
         {activePage === 'speedtest' && <SpeedTestPage />}
         {activePage === 'network' && <NetworkStatusPage />}
         {activePage === 'router' && <RouterInfoPage />}

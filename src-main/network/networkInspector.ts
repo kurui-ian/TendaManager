@@ -6,9 +6,29 @@ import { logger } from '../logger/logger';
 
 const execFileAsync = promisify(execFile);
 
+const TENDA_MAC_PREFIXES = [
+  'D8:32:14',
+  'C8:3A:35',
+  '04:95:E6',
+  '50:0F:F5',
+  'B4:0F:3B',
+  'CC:2D:21',
+  'E8:65:D4',
+  '00:B0:0C',
+  '08:40:F3',
+  'B0:DF:C1',
+];
+
+export interface ArpNeighbor {
+  ip: string;
+  mac: string;
+  isTendaOui: boolean;
+}
+
 /**
- * Inspects OS network interfaces and Windows routing/wireless state to determine
- * the active local IPv4 address, subnet mask, default gateway, DNS servers, and SSID.
+ * Inspects OS network interfaces, Windows routing/wireless state, and ARP neighbor table
+ * to determine the active local IPv4 address, subnet mask, default gateway, DNS servers,
+ * connected SSID, and any Tenda devices operating in Universal Repeater / AP mode on the subnet.
  */
 export class NetworkInspector {
   public async getActiveNetworkInterface(): Promise<NetworkInterfaceInfo | null> {
@@ -22,7 +42,6 @@ export class NetworkInspector {
 
     for (const [name, addrs] of Object.entries(interfaces)) {
       if (!addrs) continue;
-      // Skip virtual/loopback adapters where possible
       if (/loopback|vmware|vbox|virtualbox|vethernet|wsl|docker|hyper-v/i.test(name)) {
         continue;
       }
@@ -42,7 +61,6 @@ export class NetworkInspector {
       return null;
     }
 
-    // Prefer Wi-Fi or Ethernet interface
     candidates.sort((a, b) => {
       const aScore = /wi-fi|wlan|wireless/i.test(a.name) ? 2 : /ethernet|eth/i.test(a.name) ? 1 : 0;
       const bScore = /wi-fi|wlan|wireless/i.test(b.name) ? 2 : /ethernet|eth/i.test(b.name) ? 1 : 0;
@@ -82,6 +100,46 @@ export class NetworkInspector {
     return '192.168.0.1';
   }
 
+  /**
+   * Inspects the OS ARP cache (`arp -a`) to find active IPv4 devices on the local subnet.
+   * This is essential when the Tenda F3 is operating in Universal Repeater (`client+ap`) or AP mode,
+   * where the Tenda F3 receives a DHCP IP on the upstream router's subnet (e.g. 192.168.100.8).
+   */
+  public async getArpNeighbors(localIp?: string): Promise<ArpNeighbor[]> {
+    try {
+      const { stdout } = await execFileAsync('arp', ['-a'], { timeout: 3000 });
+      const lines = stdout.split(/\r?\n/);
+      const subnetPrefix = localIp ? localIp.split('.').slice(0, 3).join('.') + '.' : null;
+      const neighbors: ArpNeighbor[] = [];
+
+      for (const line of lines) {
+        const match = line.match(/(\d{1,3}(?:\.\d{1,3}){3})\s+([0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5})\s+(\w+)/);
+        if (!match) continue;
+        const ip = match[1];
+        const mac = match[2].toUpperCase().replace(/-/g, ':');
+        const type = match[3].toLowerCase();
+
+        // Skip multicast, broadcast, or non-dynamic entries
+        if (type === 'static' || ip.endsWith('.255') || ip.startsWith('224.') || ip.startsWith('239.')) {
+          continue;
+        }
+        if (subnetPrefix && !ip.startsWith(subnetPrefix)) {
+          continue;
+        }
+
+        const isTendaOui = TENDA_MAC_PREFIXES.some((prefix) => mac.startsWith(prefix));
+        neighbors.push({ ip, mac, isTendaOui });
+      }
+
+      // Sort Tenda OUI MACs first
+      neighbors.sort((a, b) => Number(b.isTendaOui) - Number(a.isTendaOui));
+      return neighbors;
+    } catch (err) {
+      logger.debug('NetworkInspector', 'ARP neighbor inspection failed', err);
+      return [];
+    }
+  }
+
   private async parseWindowsNetworkDetails(
     targetLocalIp: string
   ): Promise<{ gateway: string | null; dnsServers: string[] }> {
@@ -95,7 +153,6 @@ export class NetworkInspector {
       let matchedGateway: string | null = null;
       const dnsServers: string[] = [];
 
-      // Look through adapter sections for the one containing targetLocalIp
       let currentBlockText = '';
       for (const line of stdout.split(/\r?\n/)) {
         if (/^[A-Za-z0-9].*adapter /i.test(line)) {

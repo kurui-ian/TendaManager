@@ -9,6 +9,7 @@ import {
   EyeOff,
   HelpCircle,
   Lock,
+  Radio,
   RefreshCw,
   Server,
   Wifi,
@@ -46,10 +47,15 @@ export const OnboardingLogin: React.FC = () => {
     }
   }, [discovery, settings]);
 
+  const isPasswordlessRouter =
+    discovery?.isTendaDetected &&
+    discovery?.hasLoginPassword === false &&
+    discovery?.reachableGateway === routerAddress.trim();
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
-    if (!password.trim()) {
+    if (!isPasswordlessRouter && !password.trim()) {
       setErrorMsg('Please enter the router administrator password.');
       return;
     }
@@ -111,7 +117,7 @@ export const OnboardingLogin: React.FC = () => {
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
             <span style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-              {discovering ? 'Scanning Local Network...' : 'Network Discovery Summary'}
+              {discovering ? 'Scanning Local Network & ARP Neighbors...' : 'Network Discovery Summary'}
             </span>
             <button
               type="button"
@@ -155,12 +161,29 @@ export const OnboardingLogin: React.FC = () => {
 
           <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)' }}>
             {discovery?.isTendaDetected ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--status-success)', fontSize: '12.5px' }}>
-                <CheckCircle2 size={15} />
-                <span>
-                  Detected <strong>{discovery.detectedModel || 'Tenda F3'}</strong> ({discovery.detectedHardwareVersion}) at{' '}
-                  <strong className="mono">{discovery.reachableGateway}</strong>
-                </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--status-success)', fontSize: '12.5px' }}>
+                  <CheckCircle2 size={15} />
+                  <span>
+                    Detected <strong>{discovery.detectedModel || 'Tenda F3'}</strong> ({discovery.detectedHardwareVersion}) at{' '}
+                    <strong className="mono">{discovery.reachableGateway}</strong>
+                  </span>
+                </div>
+                {discovery.operatingMode && discovery.operatingMode !== 'disabled' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-primary)', fontSize: '12px' }}>
+                    <Radio size={14} />
+                    <span>
+                      Operating in{' '}
+                      <strong>
+                        {discovery.operatingMode === 'client+ap'
+                          ? 'Universal Repeater Mode'
+                          : discovery.operatingMode.toUpperCase()}
+                      </strong>
+                      {discovery.upstreamSsid ? ` • Bridging "${discovery.upstreamSsid}"` : ''}
+                      {discovery.extenderSsid ? ` → "${discovery.extenderSsid}"` : ''}
+                    </span>
+                  </div>
+                )}
               </div>
             ) : discovery?.nonTendaVendorHint ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12.5px' }}>
@@ -222,7 +245,7 @@ export const OnboardingLogin: React.FC = () => {
           <div className="form-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label className="form-label" htmlFor="router-password-input">
-                Administrator Password
+                Administrator Password {isPasswordlessRouter && <span className="badge badge-success" style={{ marginLeft: 6 }}>No Password Set</span>}
               </label>
               <button
                 type="button"
@@ -246,7 +269,11 @@ export const OnboardingLogin: React.FC = () => {
                 style={{ paddingRight: '42px' }}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter router login password"
+                placeholder={
+                  isPasswordlessRouter
+                    ? 'No login password set on router (leave blank to connect)'
+                    : 'Enter router login password'
+                }
                 autoFocus
               />
               <button
@@ -296,7 +323,11 @@ export const OnboardingLogin: React.FC = () => {
             disabled={submitting}
           >
             <Lock size={16} />
-            {submitting ? 'Authenticating with Router...' : 'LOGIN'}
+            {submitting
+              ? 'Authenticating with Router...'
+              : isPasswordlessRouter && !password
+              ? `CONNECT TO ${routerAddress}`
+              : 'LOGIN'}
           </button>
         </form>
 
@@ -323,7 +354,7 @@ export const OnboardingLogin: React.FC = () => {
             </button>
           </div>
 
-          { (!discovery?.isTendaDetected || showTroubleshoot) && (
+          {(!discovery?.isTendaDetected || showTroubleshoot) && (
             <div
               style={{
                 backgroundColor: 'var(--bg-input)',
@@ -342,7 +373,7 @@ export const OnboardingLogin: React.FC = () => {
               <ul style={{ paddingLeft: '18px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <li>Ensure your PC is connected to the Tenda F3 Wi-Fi or LAN port.</li>
                 <li>Default Tenda F3 management address is <code className="mono">192.168.0.1</code> or <code className="mono">tendawifi.com</code>.</li>
-                <li>If your ISP modem/ONT is at <code className="mono">{discovery?.networkInterface?.defaultGateway || '192.168.100.1'}</code>, connect directly to the Tenda router SSID.</li>
+                <li>In <strong>Universal Repeater</strong> mode, the Tenda F3 uses an IP from your main router (auto-detected via ARP).</li>
               </ul>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>

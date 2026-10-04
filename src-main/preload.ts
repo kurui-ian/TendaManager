@@ -4,6 +4,7 @@ import {
   AuthCredentials,
   BandwidthRule,
   SpeedTestProgress,
+  WifiRelayMode,
   WifiSettings,
 } from './router/types';
 
@@ -32,9 +33,19 @@ const tendaApi = {
   unblockDevice: (macAddress: string) => ipcRenderer.invoke('devices:unblock', macAddress),
   setBandwidthRule: (rule: BandwidthRule) => ipcRenderer.invoke('devices:set-bandwidth', rule),
 
-  // Wi-Fi Management
+  // Wi-Fi Management & Wireless Repeating (Universal Repeater / WISP / AP)
   getWifiSettings: () => ipcRenderer.invoke('wifi:get-settings'),
   updateWifiSettings: (settings: WifiSettings) => ipcRenderer.invoke('wifi:update-settings', settings),
+  getWifiRelayConfig: () => ipcRenderer.invoke('wifi:get-relay'),
+  scanWifiNetworks: () => ipcRenderer.invoke('wifi:scan-networks'),
+  setWifiRelayConfig: (config: {
+    mode: WifiRelayMode;
+    upstreamSsid?: string;
+    upstreamMac?: string;
+    upstreamChannel?: string;
+    upstreamSecurityMode?: string;
+    upstreamPassword?: string;
+  }) => ipcRenderer.invoke('wifi:set-relay', config),
 
   // Speed Test
   runSpeedTest: () => ipcRenderer.invoke('speedtest:run'),
